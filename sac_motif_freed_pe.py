@@ -353,6 +353,22 @@ class sac:
         tm = time.localtime(time.time())
         self.init_tm = time.strftime('_%Y-%m-%d_%I:%M:%S-%p', tm)
 
+    def compute_entropy(self, ac_prob, log_ac_prob):
+        ac_prob_sp = torch.split(ac_prob, self.action_dims, dim=1)
+        log_ac_prob_sp = torch.split(log_ac_prob, self.action_dims, dim=1)
+        ac_prob_comb = torch.einsum('by, bz->byz', ac_prob_sp[1], ac_prob_sp[2]).reshape(self.batch_size, -1) # (bs , 73 x 40)
+        ac_prob_comb = torch.einsum('bx, bz->bxz', ac_prob_sp[0], ac_prob_comb).reshape(self.batch_size, -1) # (bs , 40 x 73 x 40)
+        # order by (a1, b1, c1) (a1, b1, c2)! Be advised!
+        
+        log_ac_prob_comb = log_ac_prob_sp[0].reshape(self.batch_size, self.action_dims[0], 1, 1).repeat(
+                                    1, 1, self.action_dims[1], self.action_dims[2]).reshape(self.batch_size, -1)\
+                            + log_ac_prob_sp[1].reshape(self.batch_size, 1, self.action_dims[1], 1).repeat(
+                                    1, self.action_dims[0], 1, self.action_dims[2]).reshape(self.batch_size, -1)\
+                            + log_ac_prob_sp[2].reshape(self.batch_size, 1, 1, self.action_dims[2]).repeat(
+                                    1, self.action_dims[0], self.action_dims[1], 1).reshape(self.batch_size, -1)
+        
+        return -(ac_prob_comb * log_ac_prob_comb).sum(dim=1)
+
     def compute_loss_q(self, data):
 
         ac_first, ac_second, ac_third = data['ac_first'], data['ac_second'], data['ac_third']
@@ -379,7 +395,9 @@ class sac:
             q1_pi_targ = self.ac_targ.q1(o2_g_emb, ac2_first, ac2_second, ac2_third)
             q2_pi_targ = self.ac_targ.q2(o2_g_emb, ac2_first, ac2_second, ac2_third)
             q_pi_targ = torch.min(q1_pi_targ, q2_pi_targ).squeeze()
-            backup = r + self.gamma * (1 - d) * q_pi_targ
+            entropy = self.compute_entropy(a2_prob, log_a2_prob)
+            alpha = np.clip(self.log_alpha.exp().item(), self.alpha_min, self.alpha_max)
+            backup = r + self.gamma * (1 - d) * (q_pi_targ + alpha * entropy)
 
         # MSE loss against Bellman backup
 
@@ -406,15 +424,12 @@ class sac:
         q2_pi = self.ac.q2(o_g_emb, ac_first, ac_second, ac_third)
         q_pi = torch.min(q1_pi, q2_pi)
 
-        ac_prob_sp = torch.split(ac_prob, self.action_dims, dim=1)
-        log_ac_prob_sp = torch.split(log_ac_prob, self.action_dims, dim=1)
         
         # loss_policy = torch.mean(-q_pi)      
         loss_policy = torch.mean(-q_pi*sampling_score)         
 
         # Entropy-regularized policy loss
-        alpha = min(self.log_alpha.exp().item(), args.alpha_max)
-        alpha = max(self.log_alpha.exp().item(), args.alpha_min)
+        alpha = np.clip(self.log_alpha.exp().item(), self.alpha_min, self.alpha_max)
 
         loss_entropy = 0
         loss_alpha = 0
@@ -424,19 +439,10 @@ class sac:
         ent_weight = [1, 1, 1]
         # get ac1 x ac2 x ac3 
         
-        ac_prob_comb = torch.einsum('by, bz->byz', ac_prob_sp[1], ac_prob_sp[2]).reshape(self.batch_size, -1) # (bs , 73 x 40)
-        ac_prob_comb = torch.einsum('bx, bz->bxz', ac_prob_sp[0], ac_prob_comb).reshape(self.batch_size, -1) # (bs , 40 x 73 x 40)
-        # order by (a1, b1, c1) (a1, b1, c2)! Be advised!
-        
-        log_ac_prob_comb = log_ac_prob_sp[0].reshape(self.batch_size, self.action_dims[0], 1, 1).repeat(
-                                    1, 1, self.action_dims[1], self.action_dims[2]).reshape(self.batch_size, -1)\
-                            + log_ac_prob_sp[1].reshape(self.batch_size, 1, self.action_dims[1], 1).repeat(
-                                    1, self.action_dims[0], 1, self.action_dims[2]).reshape(self.batch_size, -1)\
-                            + log_ac_prob_sp[2].reshape(self.batch_size, 1, 1, self.action_dims[2]).repeat(
-                                    1, self.action_dims[0], self.action_dims[1], 1).reshape(self.batch_size, -1)
-        loss_entropy = ((alpha * ac_prob_comb * log_ac_prob_comb).sum(dim=1)*sampling_score).mean()
-        loss_alpha = -(sampling_score*self.log_alpha.to(self.device) * \
-                        ((ac_prob_comb*log_ac_prob_comb).sum(dim=1) + self.target_entropy).detach()).mean()
+        entropy = self.compute_entropy(ac_prob, log_ac_prob)
+        loss_entropy = -alpha * (sampling_score * entropy).mean()
+        loss_alpha = self.log_alpha.to(self.device) * (sampling_score * \
+            (entropy - self.target_entropy).detach()).mean()
         
         print('loss policy', loss_policy)
         print('loss entropy', loss_entropy)
@@ -444,7 +450,7 @@ class sac:
 
         # Record things
         if self.writer is not None:
-            self.writer.add_scalar("Entropy", sum(-(x * ac_prob_sp[i]).mean() for i, x in enumerate(log_ac_prob_sp)), self.iter_so_far)
+            self.writer.add_scalar("Entropy", entropy.mean().item(), self.iter_so_far)
             self.writer.add_scalar("Alpha", alpha, self.iter_so_far)
 
         return loss_entropy, loss_policy, loss_alpha
