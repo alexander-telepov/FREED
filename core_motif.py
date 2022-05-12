@@ -487,7 +487,7 @@ class SFSPolicy(nn.Module):
                             log_ac_second_prob, log_ac_third_prob], dim=1).contiguous()
         ac = torch.stack([ac_first, ac_second, ac_third], dim=1)
 
-        return ac, (ac_prob, (log_ac_prob.exp() + 1e-8).log()), (ac_first_hot, ac_second_hot, ac_third_hot)
+        return ac, (ac_prob, log_ac_prob), (ac_first_hot, ac_second_hot, ac_third_hot)
     
     def sample(self, ac, graph_emb, node_emb, g, cands):
         g.ndata['node_emb'] = node_emb
@@ -585,7 +585,7 @@ class SFSPolicy(nn.Module):
         log_ac_prob = torch.cat([log_ac_first_prob, 
                             log_ac_second_prob, log_ac_third_prob], dim=1).contiguous()
 
-        return (ac_prob, (log_ac_prob.exp() + 1e-8).log()), (ac_first_prob, ac_second_hot, ac_third_prob)
+        return (ac_prob, log_ac_prob), (ac_first_prob, ac_second_hot, ac_third_prob)
         
 
 class GCNEmbed(nn.Module):

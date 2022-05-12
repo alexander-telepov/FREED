@@ -352,21 +352,15 @@ class sac:
         tm = time.localtime(time.time())
         self.init_tm = time.strftime('_%Y-%m-%d_%I:%M:%S-%p', tm)
 
-    def compute_entropy(self, ac_prob, log_ac_prob):
-        ac_prob_sp = torch.split(ac_prob, self.action_dims, dim=1)
-        log_ac_prob_sp = torch.split(log_ac_prob, self.action_dims, dim=1)
-        ac_prob_comb = torch.einsum('by, bz->byz', ac_prob_sp[1], ac_prob_sp[2]).reshape(self.batch_size, -1) # (bs , 73 x 40)
-        ac_prob_comb = torch.einsum('bx, bz->bxz', ac_prob_sp[0], ac_prob_comb).reshape(self.batch_size, -1) # (bs , 40 x 73 x 40)
-        # order by (a1, b1, c1) (a1, b1, c2)! Be advised!
-        
-        log_ac_prob_comb = log_ac_prob_sp[0].reshape(self.batch_size, self.action_dims[0], 1, 1).repeat(
-                                    1, 1, self.action_dims[1], self.action_dims[2]).reshape(self.batch_size, -1)\
-                            + log_ac_prob_sp[1].reshape(self.batch_size, 1, self.action_dims[1], 1).repeat(
-                                    1, self.action_dims[0], 1, self.action_dims[2]).reshape(self.batch_size, -1)\
-                            + log_ac_prob_sp[2].reshape(self.batch_size, 1, 1, self.action_dims[2]).repeat(
-                                    1, self.action_dims[0], self.action_dims[1], 1).reshape(self.batch_size, -1)
-        
-        return -(ac_prob_comb * log_ac_prob_comb).sum(dim=1)
+    def compute_entropy(self, log_ac_prob, ac, eps=1e-8):
+        bs = ac[0].size(0)
+        entropy = list()
+        for log_prob, ac in zip(torch.split(log_ac_prob, self.action_dims, dim=1), ac):
+            masked_log_prob = log_prob.masked_fill(log_prob.isinf(), 0)
+            shifted_log_prob = (masked_log_prob.exp() + eps).log()
+            entropy.append((shifted_log_prob.view(bs, 1, -1) @ ac.view(bs, -1, 1)).squeeze(-1))
+
+        return - torch.sum(torch.stack(entropy, dim=0), dim=0)
 
     def compute_loss_q(self, data):
 
@@ -389,12 +383,12 @@ class sac:
         with torch.no_grad():
             o2_g, o2_n_emb, o2_g_emb = self.ac.embed(o2)
             cands = self.ac.embed(self.ac.pi.cand)
-            a2, (a2_prob, log_a2_prob), (ac2_first, ac2_second, ac2_third) = self.ac.pi(o2_g_emb, o2_n_emb, o2_g, cands)
+            a2, (a2_prob, log_a2_prob), ac2 = self.ac.pi(o2_g_emb, o2_n_emb, o2_g, cands)
             # Target Q-values
-            q1_pi_targ = self.ac_targ.q1(o2_g_emb, ac2_first, ac2_second, ac2_third)
-            q2_pi_targ = self.ac_targ.q2(o2_g_emb, ac2_first, ac2_second, ac2_third)
+            q1_pi_targ = self.ac_targ.q1(o2_g_emb, *ac2)
+            q2_pi_targ = self.ac_targ.q2(o2_g_emb, *ac2)
             q_pi_targ = torch.min(q1_pi_targ, q2_pi_targ).squeeze()
-            entropy = self.compute_entropy(a2_prob, log_a2_prob)
+            entropy = self.compute_entropy(log_a2_prob, ac2)
             alpha = np.clip(self.log_alpha.exp().item(), self.alpha_min, self.alpha_max)
             backup = r + self.gamma * (1 - d) * (q_pi_targ + alpha * entropy)
 
@@ -415,11 +409,11 @@ class sac:
             o_g, o_n_emb, o_g_emb = o_embeds
             cands = self.ac.embed(self.ac.pi.cand)
 
-        _, (ac_prob, log_ac_prob), (ac_first, ac_second, ac_third) = \
+        _, (ac_prob, log_ac_prob), ac = \
             self.ac.pi(o_g_emb, o_n_emb, o_g, cands)
 
-        q1_pi = self.ac.q1(o_g_emb, ac_first, ac_second, ac_third)
-        q2_pi = self.ac.q2(o_g_emb, ac_first, ac_second, ac_third)
+        q1_pi = self.ac.q1(o_g_emb, *ac)
+        q2_pi = self.ac.q2(o_g_emb, *ac)
         q_pi = torch.min(q1_pi, q2_pi)
 
         
@@ -438,7 +432,7 @@ class sac:
         # get ac1 x ac2 x ac3 
         
         
-        entropy = self.compute_entropy(ac_prob, log_ac_prob)
+        entropy = self.compute_entropy(log_ac_prob, ac)
         loss_entropy = -alpha * (sampling_score * entropy).mean()
         loss_alpha = self.log_alpha.to(self.device) * (sampling_score * \
             (entropy - self.target_entropy).detach()).mean()

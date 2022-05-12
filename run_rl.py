@@ -256,12 +256,14 @@ def main():
     args.ratios = ratios
     
     # check and clean
-    if not os.path.exists('molecule_gen'):
-        os.makedirs('molecule_gen')
-    if not os.path.exists('ckpt'):
-        os.makedirs('ckpt')
+    if not os.path.exists('/mnt/2tb/experiments/freed/fork/entr_calc_temp/molecule_gen'):
+        os.makedirs('/mnt/2tb/experiments/freed/fork/entr_calc_temp/molecule_gen')
+    if not os.path.exists('/mnt/2tb/experiments/freed/fork/entr_calc_temp/ckpt'):
+        os.makedirs('/mnt/2tb/experiments/freed/fork/entr_calc_temp/ckpt')
+    if not os.path.exists('/mnt/2tb/experiments/freed/fork/entr_calc_temp/logs'):
+        os.makedirs('/mnt/2tb/experiments/freed/fork/entr_calc_temp/logs')
 
-    writer = SummaryWriter(comment='_'+args.name)
+    writer = SummaryWriter('/mnt/2tb/experiments/freed/fork/entr_calc_temp/logs', comment='_'+args.name)
 
     # device
     gpu_use = False

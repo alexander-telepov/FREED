@@ -10,4 +10,5 @@ CUDA_LAUNCH_BLOCKING=1 python run_rl.py --name='motifs_1k_fa7_5krandom_141_ent0.
                        --desc='ecfp' \
                        --rl_model='sac' \
                        --active_learning='freed_pe' \
-                       --gpu_id=0 --emb_size=64 --tau=1e-1 --batch_size=128 --target_entropy=0.05 > /mnt/2tb/experiments/freed/logs/logs_fork/entr_calc.txt
+                       --gpu_id=0 --emb_size=64 --tau=1e-1 --batch_size=128 --init_alpha=1e-3 \
+                       --train_alpha=0 --alpha_min=1e-3 > /mnt/2tb/experiments/freed/logs/logs_fork/ac_2.txt
