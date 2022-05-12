@@ -68,7 +68,7 @@ class ReplayBuffer:
         self.beta_frames = int(1e4)
 
     def store(self, obs, act, rew, next_obs, done, ac_prob, log_ac_prob, \
-                ac_first_prob, ac_second_hot, ac_third_prob, \
+                ac_first, ac_second, ac_third, \
                 o_embeds, sampling_score):
         if self.size == self.max_size:
             self.obs_buf.pop(0)
@@ -89,9 +89,9 @@ class ReplayBuffer:
         self.ac_prob_buf.append(ac_prob)
         self.log_ac_prob_buf.append(log_ac_prob)
         
-        self.ac_first_buf.append(ac_first_prob)
-        self.ac_second_buf.append(ac_second_hot)
-        self.ac_third_buf.append(ac_third_prob)
+        self.ac_first_buf.append(ac_first)
+        self.ac_second_buf.append(ac_second)
+        self.ac_third_buf.append(ac_third)
         self.o_embeds_buf.append(o_embeds)
         
 

@@ -337,8 +337,10 @@ class SFSPolicy(nn.Module):
         if g.batch_size != 1:  
             first_stack = []
             first_ac_stack = []
+            ac_first_hot = []
             for i, node_emb_i in enumerate(torch.split(att_emb, att_len, dim=0)):
                 ac_first_hot_i = self.gumbel_softmax(log_ac_first_prob[i], tau=self.tau, hard=True, dim=0).transpose(0,1)
+                ac_first_hot.append(ac_first_hot_i.transpose(0,1))
                 ac_first_i = torch.argmax(ac_first_hot_i, dim=-1)
                 first_stack.append(torch.matmul(ac_first_hot_i, node_emb_i))
                 first_ac_stack.append(ac_first_i)
@@ -359,6 +361,12 @@ class SFSPolicy(nn.Module):
                                             , 0).contiguous().view(1,self.max_action)
                                     for i, log_ac_first_prob_i in enumerate(log_ac_first_prob)], dim=0).contiguous()
             
+            ac_first_hot = torch.cat([
+                                torch.cat([ac_first_hot_i, ac_first_hot_i.new_zeros(
+                                    max(self.max_action - ac_first_hot_i.size(0),0),1)]
+                                        , 0).contiguous().view(1,self.max_action)
+                                for i, ac_first_hot_i in enumerate(ac_first_hot)], dim=0).contiguous()
+            
         else:            
             ac_first_hot = self.gumbel_softmax(log_ac_first_prob, tau=self.tau, hard=True, dim=0).transpose(0,1)
             ac_first = torch.argmax(ac_first_hot, dim=-1)
@@ -369,6 +377,9 @@ class SFSPolicy(nn.Module):
             log_ac_first_prob = torch.cat([log_ac_first_prob, torch.full(
                             (max(self.max_action - log_ac_first_prob.size(0),0),1), float("-inf"), device=self.device)]
                                 , 0).contiguous().view(1,self.max_action)
+            ac_first_hot = torch.cat([ac_first_hot, ac_first_hot.new_zeros(
+                            1, max(self.max_action - ac_first_hot.size(1),0))]
+                                , 1).contiguous().view(1,self.max_action)
 
         # =============================== 
         # step 2 : which motif to add - Using Descriptors
@@ -426,13 +437,14 @@ class SFSPolicy(nn.Module):
         if g.batch_size != 1:
             third_stack = []
             third_ac_stack = []
+            ac_third_hot = []
             for i, node_emb_i in enumerate(torch.split(emb_cat_ac3, ac3_att_len, dim=0)):
                 ac_third_hot_i = self.gumbel_softmax(log_ac_third_prob[i], tau=self.tau, hard=True, dim=-1)
+                ac_third_hot.append(ac_third_hot_i.view(1, -1))
                 ac_third_i = torch.argmax(ac_third_hot_i, dim=-1)
                 third_stack.append(torch.matmul(ac_third_hot_i, node_emb_i))
                 third_ac_stack.append(ac_third_i)
 
-                del ac_third_hot_i
             emb_third = torch.stack(third_stack, dim=0).squeeze(1)
             ac_third = torch.stack(third_ac_stack, dim=0)
             ac_third_prob = torch.cat([
@@ -446,6 +458,12 @@ class SFSPolicy(nn.Module):
                                         (self.max_action - log_ac_third_prob_i.size(0), ), float("-inf"), device=self.device)]
                                             , 0).contiguous().view(1,self.max_action)
                                     for i, log_ac_third_prob_i in enumerate(log_ac_third_prob)], dim=0).contiguous()
+            
+            ac_third_hot = torch.cat([
+                                torch.cat([ac_third_hot_i, ac_third_hot_i.new_zeros(
+                                    (1, self.max_action - ac_third_hot_i.size(1)))]
+                                        , dim=1).contiguous().view(1,self.max_action)
+                                for i, ac_third_hot_i in enumerate(ac_third_hot)], dim=0).contiguous()
 
         else:
             ac_third_hot = self.gumbel_softmax(log_ac_third_prob, tau=self.tau, hard=True, dim=-1)
@@ -458,6 +476,9 @@ class SFSPolicy(nn.Module):
             log_ac_third_prob = torch.cat([log_ac_third_prob, torch.full(
                                         (1, self.max_action - log_ac_third_prob.size(1)), float("-inf"), device=self.device)]
                                 , -1).contiguous()
+            ac_third_hot = torch.cat([ac_third_hot, ac_third_hot.new_zeros(
+                                        1, self.max_action - ac_third_hot.size(1))] 
+                                , -1).contiguous()
 
         # ==== concat everything ====
 
@@ -466,7 +487,7 @@ class SFSPolicy(nn.Module):
                             log_ac_second_prob, log_ac_third_prob], dim=1).contiguous()
         ac = torch.stack([ac_first, ac_second, ac_third], dim=1)
 
-        return ac, (ac_prob, (log_ac_prob.exp() + 1e-8).log()), (ac_first_prob, ac_second_hot, ac_third_prob)
+        return ac, (ac_prob, (log_ac_prob.exp() + 1e-8).log()), (ac_first_hot, ac_second_hot, ac_third_hot)
     
     def sample(self, ac, graph_emb, node_emb, g, cands):
         g.ndata['node_emb'] = node_emb
