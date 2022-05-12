@@ -87,7 +87,6 @@ class MoleculeEnv(gym.Env):
 
         self.mol = Chem.MolFromSmiles(self.smi)
         self.smile_list = []
-        self.smile_old_list = []
 
         possible_atoms = ATOM_VOCAB
         possible_motifs = FRAG_VOCAB
@@ -154,56 +153,35 @@ class MoleculeEnv(gym.Env):
         -1 if otherwise
         """
         ac = ac[0]
-         
-        ### init
-        info = {}  # info we care about
         self.mol_old = copy.deepcopy(self.mol) # keep old mol
+        self._add_motif(ac)
         
-        stop = False    
-        new = False
-        
-        if (self.counter >= self.max_action) or get_att_points(self.mol) == []:
-            new = True
-        else:
-            self._add_motif(ac) # problems here
-
         reward_step = 0.05
         if self.mol.GetNumAtoms() > self.mol_old.GetNumAtoms():
             reward_step += 0.005
+
         self.counter += 1
 
-        if new:            
-            reward = 0
-            # Only store for obs if attachment point exists in o2
-            if get_att_points(self.mol) != []:
-                mol_no_att = self.get_final_mol() 
-                Chem.SanitizeMol(mol_no_att, sanitizeOps=Chem.SanitizeFlags.SANITIZE_KEKULIZE)
-                smi_no_att = Chem.MolToSmiles(mol_no_att)
-                info['smile'] = smi_no_att
-                print("smi:", smi_no_att)
-                self.smile_list.append(smi_no_att)
-
-                # Info for old mol
-                mol_old_no_att = self.get_final_mol_ob(self.mol_old)
-                Chem.SanitizeMol(mol_old_no_att, sanitizeOps=Chem.SanitizeFlags.SANITIZE_KEKULIZE)
-                smi_old_no_att = Chem.MolToSmiles(mol_no_att)
-                info['old_smi'] = smi_old_no_att
-                self.smile_old_list.append(smi_old_no_att)
-
-                stop = True
-            else:
-                stop = False
-            self.counter = 0      
-
-        ### use stepwise reward
+        
+        if (self.counter >= self.max_action) or get_att_points(self.mol) == []:
+            done = True
         else:
-            reward = reward_step
+            done = False
 
-        info['stop'] = stop
+        if done:            
+            reward = 0
+            mol_no_att = self.get_final_mol() 
+            Chem.SanitizeMol(mol_no_att, sanitizeOps=Chem.SanitizeFlags.SANITIZE_KEKULIZE)
+            smi_no_att = Chem.MolToSmiles(mol_no_att)
+            print("smi:", smi_no_att)
+            self.smile_list.append(smi_no_att)
+        else:
+            ### use stepwise reward
+            reward = reward_step
 
         # get observation
         ob = self.get_observation()
-        return ob,reward,new,info
+        return ob,reward,done
 
     def reset(self,smile=None):
         '''

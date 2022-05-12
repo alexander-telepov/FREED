@@ -571,9 +571,15 @@ class GCNEmbed(nn.Module):
 
         # create attachment point mask as one-hot
         for i, x_g in enumerate(ob_g):
-            att_onehot = F.one_hot(torch.LongTensor(ob_att[i]), 
-                        num_classes=x_g.number_of_nodes()).sum(0)
-            ob_g[i].ndata['att_mask'] = att_onehot.bool()
+            if ob_att[i]:
+                att_onehot = F.one_hot(torch.LongTensor(ob_att[i]), 
+                            num_classes=x_g.number_of_nodes()).sum(0)
+                ob_g[i].ndata['att_mask'] = att_onehot.bool()
+            else:
+                # fake attachment points created for batching
+                ob_g[i].ndata['att_mask'] = torch.zeros(
+                    x_g.number_of_nodes()).bool()
+                ob_g[i].ndata['att_mask'][0] = True
 
         g = deepcopy(dgl.batch(ob_g)).to(self.device)
         

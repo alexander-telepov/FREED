@@ -586,48 +586,38 @@ class sac:
                     print(ac, 'sample')
 
             # Step the env
-            o2, r, d, info = self.env.step(ac)
+            o2, r, d = self.env.step(ac)
 
             if d and self.active_learning is not None:
                 ob_list.append(o)
                 o_embed_list.append(o_g_emb)
 
-            r_d = info['stop']
 
             # Store experience to replay buffer
-            # Problems: attachment points may not exists in o2
-            # Only store Obs where attachment point exits in o2
+            if self.active_learning == 'per':
+                if t >= self.update_after:
+                    intr_rew = self.compute_per_rew([o], [o2], r, d, \
+                                        ac_first, ac_second, ac_third)
+                else:
+                    intr_rew = 1e-8
 
-            if any(o2['att']):
-                if self.active_learning == 'per':
-                    if t >= self.update_after:
-                        intr_rew = self.compute_per_rew([o], [o2], r, r_d, \
-                                            ac_first, ac_second, ac_third)
-                    else:
-                        intr_rew = 1e-8
-
-                if self.writer:
-                    self.writer.add_scalar("EpActiveRet", intr_rew, self.iter_so_far)
-                
-                if type(ac) == np.ndarray:
-                    self.replay_buffer.store(o, ac, r, o2, r_d, 
-                                            ac_prob, log_ac_prob, ac_first, ac_second, ac_third,
-                                            o_embeds, intr_rew)
-                else:    
-                    self.replay_buffer.store(o, ac.detach().cpu().numpy(), r, o2, r_d, 
-                                            ac_prob, log_ac_prob, ac_first, ac_second, ac_third,
-                                            o_embeds, intr_rew)
+            if self.writer:
+                self.writer.add_scalar("EpActiveRet", intr_rew, self.iter_so_far)
+            
+            if type(ac) == np.ndarray:
+                self.replay_buffer.store(o, ac, r, o2, d, 
+                                        ac_prob, log_ac_prob, ac_first, ac_second, ac_third,
+                                        o_embeds, intr_rew)
+            else:    
+                self.replay_buffer.store(o, ac.detach().cpu().numpy(), r, o2, d, 
+                                        ac_prob, log_ac_prob, ac_first, ac_second, ac_third,
+                                        o_embeds, intr_rew)
 
             # Super critical, easy to overlook step: make sure to update 
             # most recent observation!
             o = o2
 
             # End of trajectory handling
-            if get_att_points(self.env.mol) == []: # Temporally force attachment calculation
-                d = True
-            if not any(o2['att']):
-                d = True
-
             if d:
                 o, ep_ret, ep_len = self.env.reset(), 0, 0
                 self.ep_so_far += 1
