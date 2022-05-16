@@ -256,14 +256,14 @@ def main():
     args.ratios = ratios
     
     # check and clean
-    if not os.path.exists('/mnt/2tb/experiments/freed/fork/entr_calc_temp/molecule_gen'):
-        os.makedirs('/mnt/2tb/experiments/freed/fork/entr_calc_temp/molecule_gen')
-    if not os.path.exists('/mnt/2tb/experiments/freed/fork/entr_calc_temp/ckpt'):
-        os.makedirs('/mnt/2tb/experiments/freed/fork/entr_calc_temp/ckpt')
-    if not os.path.exists('/mnt/2tb/experiments/freed/fork/entr_calc_temp/logs'):
-        os.makedirs('/mnt/2tb/experiments/freed/fork/entr_calc_temp/logs')
+    if not os.path.exists('/mnt/2tb/experiments/freed/fork/rewrite_qfunc/molecule_gen'):
+        os.makedirs('/mnt/2tb/experiments/freed/fork/rewrite_qfunc/molecule_gen')
+    if not os.path.exists('/mnt/2tb/experiments/freed/fork/rewrite_qfunc/ckpt'):
+        os.makedirs('/mnt/2tb/experiments/freed/fork/rewrite_qfunc/ckpt')
+    if not os.path.exists('/mnt/2tb/experiments/freed/fork/rewrite_qfunc/logs'):
+        os.makedirs('/mnt/2tb/experiments/freed/fork/rewrite_qfunc/logs')
 
-    writer = SummaryWriter('/mnt/2tb/experiments/freed/fork/entr_calc_temp/logs', comment='_'+args.name)
+    writer = SummaryWriter('/mnt/2tb/experiments/freed/fork/rewrite_qfunc/logs', comment='_'+args.name)
 
     # device
     gpu_use = False

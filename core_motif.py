@@ -134,8 +134,8 @@ class GCNActorCritic(nn.Module):
         ac_space = env.action_space
         self.env = env
         self.pi = SFSPolicy(ob_space, ac_space, env, args)
-        self.q1 = GCNQFunction(ac_space, args)
-        self.q2 = GCNQFunction(ac_space, args, override_seed=True)
+        self.q1 = GCNQFunction(args)
+        self.q2 = GCNQFunction(args, override_seed=True)
 
         # PER based model
         if args.active_learning == 'freed_bu':
@@ -164,31 +164,43 @@ class GCNActorCritic(nn.Module):
         return a
 
 class GCNQFunction(nn.Module):
-    def __init__(self, ac_space, args, override_seed=False):
+    def __init__(self, args, override_seed=False):
         super().__init__()
+        d = args.emb_size
+        self.d = d
+        device = args.device
+
         if override_seed:
             seed = args.seed + 1
             torch.manual_seed(seed)
             np.random.seed(seed)
-
-        self.batch_size = args.batch_size
-        self.device = args.device
-        self.emb_size = args.emb_size
-        self.max_action2 = len(ATOM_VOCAB)
-        self.max_action_stop = 2
-
-        self.d = 2 * args.emb_size + len(FRAG_VOCAB) + 80 
-        self.out_dim = 1
+            if torch.cuda.is_available():
+                torch.cuda.manual_seed(seed)
+                torch.cuda.manual_seed_all(seed)
         
-        self.qpred_layer = nn.Sequential(
-                            nn.Linear(self.d, int(self.d//2), bias=False),
-                            nn.ReLU(inplace=False),
-                            nn.Linear(int(self.d//2), self.out_dim, bias=True))
+        for i in range(1, 4):
+            setattr(self, f'action{i}_layers', nn.ModuleList([nn.Bilinear(2 * d if i == 2 else d, 2 * d if i == 1 else d, d).to(device),
+                                    nn.Linear(2 * d if i == 2 else d, d, bias=False).to(device),
+                                    nn.Linear(2 * d if i == 1 else d, d, bias=False).to(device),
+                                    nn.Sequential(
+                                    nn.Linear(d, d // 2, bias=False),
+                                    nn.LayerNorm(d // 2),
+                                    nn.ReLU(inplace=False),
+                                    nn.Linear(d // 2, 1, bias=True)).to(device)]))
     
-    def forward(self, graph_emb, ac_first_prob, ac_second_hot, ac_third_prob):
-        emb_state_action = torch.cat([graph_emb, ac_first_prob, ac_second_hot, ac_third_prob], dim=-1).contiguous()
-        qpred = self.qpred_layer(emb_state_action)
-        return qpred
+    def forward(self, graph_emb, ac_emb):
+        q_value = list()
+        d = self.d
+        q_emb = graph_emb
+        
+        for i, ac_emb in enumerate(torch.split(ac_emb, [d, 2 * d, d], dim=1), 1):
+            ac_layers = getattr(self, f'action{i}_layers')
+            q_emb = ac_layers[0](ac_emb, q_emb) + ac_layers[1](ac_emb) \
+                        + ac_layers[2](q_emb)
+            q_value.append(ac_layers[3](q_emb))
+
+        return torch.prod(torch.stack(q_value, dim=0), dim=0)
+
 
 LOG_STD_MAX = 2
 LOG_STD_MIN = -20
@@ -284,14 +296,14 @@ class SFSPolicy(nn.Module):
             ret = y_soft
         return ret
 
-    def forward(self, graph_emb, node_emb, g, cands, deterministic=False):
+    def forward(self, mol, cands, deterministic=False):
         """
         graph_emb : bs x hidden_dim
         node_emb : (bs x num_nodes) x hidden_dim)
         g: batched graph
         att: indexs of attachment points, list of list
         """
-        
+        g, node_emb, graph_emb = mol
         g.ndata['node_emb'] = node_emb
         cand_g, cand_node_emb, cand_graph_emb = cands 
 
@@ -366,6 +378,7 @@ class SFSPolicy(nn.Module):
                                     max(self.max_action - ac_first_hot_i.size(0),0),1)]
                                         , 0).contiguous().view(1,self.max_action)
                                 for i, ac_first_hot_i in enumerate(ac_first_hot)], dim=0).contiguous()
+            
             
         else:            
             ac_first_hot = self.gumbel_softmax(log_ac_first_prob, tau=self.tau, hard=True, dim=0).transpose(0,1)
@@ -458,12 +471,12 @@ class SFSPolicy(nn.Module):
                                         (self.max_action - log_ac_third_prob_i.size(0), ), float("-inf"), device=self.device)]
                                             , 0).contiguous().view(1,self.max_action)
                                     for i, log_ac_third_prob_i in enumerate(log_ac_third_prob)], dim=0).contiguous()
-            
             ac_third_hot = torch.cat([
                                 torch.cat([ac_third_hot_i, ac_third_hot_i.new_zeros(
                                     (1, self.max_action - ac_third_hot_i.size(1)))]
                                         , dim=1).contiguous().view(1,self.max_action)
                                 for i, ac_third_hot_i in enumerate(ac_third_hot)], dim=0).contiguous()
+            
 
         else:
             ac_third_hot = self.gumbel_softmax(log_ac_third_prob, tau=self.tau, hard=True, dim=-1)
@@ -487,9 +500,10 @@ class SFSPolicy(nn.Module):
                             log_ac_second_prob, log_ac_third_prob], dim=1).contiguous()
         ac = torch.stack([ac_first, ac_second, ac_third], dim=1)
 
-        return ac, (ac_prob, log_ac_prob), (ac_first_hot, ac_second_hot, ac_third_hot)
+        return ac, (ac_prob, log_ac_prob), (ac_first_hot, ac_second_hot, ac_third_hot), torch.cat([emb_first, emb_second, emb_third], dim=1)
     
-    def sample(self, ac, graph_emb, node_emb, g, cands):
+    def sample(self, ac, mol, cands):
+        g, node_emb, graph_emb = mol
         g.ndata['node_emb'] = node_emb
         cand_g, cand_node_emb, cand_graph_emb = cands 
 
@@ -585,7 +599,7 @@ class SFSPolicy(nn.Module):
         log_ac_prob = torch.cat([log_ac_first_prob, 
                             log_ac_second_prob, log_ac_third_prob], dim=1).contiguous()
 
-        return (ac_prob, log_ac_prob), (ac_first_prob, ac_second_hot, ac_third_prob)
+        return (ac_prob, log_ac_prob), torch.cat([emb_first, emb_second, emb_third], dim=1)
         
 
 class GCNEmbed(nn.Module):

@@ -49,10 +49,7 @@ class ReplayBuffer:
         self.ac_prob_buf = []
         self.log_ac_prob_buf = []
 
-        self.ac_first_buf = []
-        self.ac_second_buf = []
-        self.ac_third_buf = []
-        self.o_embeds_buf = []
+        self.ac_emb_buf = []
 
         self.ptr, self.size, self.max_size = 0, 0, size
         self.done_location = []
@@ -68,8 +65,8 @@ class ReplayBuffer:
         self.beta_frames = int(1e5)
 
     def store(self, obs, act, rew, next_obs, done, ac_prob, log_ac_prob, \
-                ac_first, ac_second, ac_third, \
-                o_embeds, sampling_score):
+                ac_emb, \
+                sampling_score):
         if self.size == self.max_size:
             self.obs_buf.pop(0)
             self.obs2_buf.pop(0)
@@ -81,7 +78,6 @@ class ReplayBuffer:
             self.ac_second_buf.pop(0)
             self.ac_third_buf.pop(0)
 
-            self.o_embeds_buf.pop(0)
 
         self.obs_buf.append(obs)
         self.obs2_buf.append(next_obs)
@@ -89,10 +85,7 @@ class ReplayBuffer:
         self.ac_prob_buf.append(ac_prob)
         self.log_ac_prob_buf.append(log_ac_prob)
         
-        self.ac_first_buf.append(ac_first)
-        self.ac_second_buf.append(ac_second)
-        self.ac_third_buf.append(ac_third)
-        self.o_embeds_buf.append(o_embeds)
+        self.ac_emb_buf.append(ac_emb)
         
         self.act_buf[self.ptr] = act
         self.rew_buf[self.ptr] = rew
@@ -136,11 +129,8 @@ class ReplayBuffer:
         delete_multiple_element(self.ac_prob_buf, zero_ptrs.tolist())
         delete_multiple_element(self.log_ac_prob_buf, zero_ptrs.tolist())
         
-        delete_multiple_element(self.ac_first_buf, zero_ptrs.tolist())
-        delete_multiple_element(self.ac_second_buf, zero_ptrs.tolist())
-        delete_multiple_element(self.ac_third_buf, zero_ptrs.tolist())
+        delete_multiple_element(self.ac_emb_buf, zero_ptrs.tolist())
 
-        delete_multiple_element(self.o_embeds_buf, zero_ptrs.tolist())
 
         self.size = min(self.size-len(zero_ptrs), self.max_size)
         self.ptr = (self.ptr-len(zero_ptrs)) % self.max_size
@@ -174,10 +164,7 @@ class ReplayBuffer:
         ac_prob_batch = [self.ac_prob_buf[idx] for idx in idxs]
         log_ac_prob_batch = [self.log_ac_prob_buf[idx] for idx in idxs]
         
-        ac_first_batch = torch.stack([self.ac_first_buf[idx] for idx in idxs]).squeeze(1)
-        ac_second_batch = torch.stack([self.ac_second_buf[idx] for idx in idxs]).squeeze(1)
-        ac_third_batch = torch.stack([self.ac_third_buf[idx] for idx in idxs]).squeeze(1)
-        o_g_emb_batch = torch.stack([self.o_embeds_buf[idx][2] for idx in idxs]).squeeze(1)
+        ac_emb_batch = torch.stack([self.ac_emb_buf[idx] for idx in idxs]).squeeze(1)
 
         act_batch = torch.as_tensor(self.act_buf[idxs], dtype=torch.float32).unsqueeze(-1).to(device)
         rew_batch = torch.as_tensor(self.rew_buf[idxs], dtype=torch.float32).to(device)
@@ -191,10 +178,7 @@ class ReplayBuffer:
                      ac_prob=ac_prob_batch,
                      log_ac_prob=log_ac_prob_batch,
                      
-                     ac_first=ac_first_batch,
-                     ac_second=ac_second_batch,
-                     ac_third=ac_third_batch,
-                     o_g_emb=o_g_emb_batch,
+                     ac_emb=ac_emb_batch,
                      idxs=idxs,
                      sampling_score=sampling_score_batch)
         return batch
@@ -244,9 +228,9 @@ class sac:
         self.polyak = polyak
         self.num_test_episodes = num_test_episodes
         self.writer = writer
-        self.fname = '/mnt/2tb/experiments/freed/fork/entr_calc_temp/molecule_gen/'+args.name_full+'.csv'
-        self.test_fname = '/mnt/2tb/experiments/freed/fork/entr_calc_temp/molecule_gen/'+args.name_full+'_test.csv'
-        self.save_name = '/mnt/2tb/experiments/freed/fork/entr_calc_temp/ckpt/' + args.name_full + '_'
+        self.fname = '/mnt/2tb/experiments/freed/fork/rewrite_qfunc/molecule_gen/'+args.name_full+'.csv'
+        self.test_fname = '/mnt/2tb/experiments/freed/fork/rewrite_qfunc/molecule_gen/'+args.name_full+'_test.csv'
+        self.save_name = '/mnt/2tb/experiments/freed/fork/rewrite_qfunc/ckpt/' + args.name_full + '_'
         self.steps_per_epoch = steps_per_epoch
         self.epochs = epochs
         self.batch_size = batch_size
@@ -366,7 +350,7 @@ class sac:
 
     def compute_loss_q(self, data):
 
-        ac_first, ac_second, ac_third = data['ac_first'], data['ac_second'], data['ac_third']
+        ac_emb = data['ac_emb']
         sampling_score = data['sampling_score']
         # # Importance corrections
 
@@ -374,21 +358,22 @@ class sac:
         self.ac.q2.train()
         o = data['obs']
 
-        _, _, o_g_emb = self.ac.embed(o)
-        q1 = self.ac.q1(o_g_emb, ac_first, ac_second, ac_third).squeeze()
-        q2 = self.ac.q2(o_g_emb.detach(), ac_first, ac_second, ac_third).squeeze()
+        o_emb = self.ac.embed(o)
+        q1 = self.ac.q1(o_emb[2], ac_emb).squeeze()
+        # TODO: here was .detach()
+        q2 = self.ac.q2(o_emb[2], ac_emb).squeeze()
 
         # Target actions come from *current* policy
         o2 = data['obs2']
         r, d = data['rew'], data['done']
 
         with torch.no_grad():
-            o2_g, o2_n_emb, o2_g_emb = self.ac.embed(o2)
+            o2_emb = self.ac.embed(o2)
             cands = self.ac.embed(self.ac.pi.cand)
-            a2, (a2_prob, log_a2_prob), ac2 = self.ac.pi(o2_g_emb, o2_n_emb, o2_g, cands)
+            a2, (a2_prob, log_a2_prob), ac2, ac2_emb = self.ac.pi(o2_emb, cands)
             # Target Q-values
-            q1_pi_targ = self.ac_targ.q1(o2_g_emb, *ac2)
-            q2_pi_targ = self.ac_targ.q2(o2_g_emb, *ac2)
+            q1_pi_targ = self.ac_targ.q1(o2_emb[2], ac2_emb)
+            q2_pi_targ = self.ac_targ.q2(o2_emb[2], ac2_emb)
             q_pi_targ = torch.min(q1_pi_targ, q2_pi_targ).squeeze()
             entropy = self.compute_entropy(log_a2_prob, ac2)
             alpha = np.clip(self.log_alpha.exp().item(), self.alpha_min, self.alpha_max)
@@ -410,15 +395,14 @@ class sac:
         sampling_score = data['sampling_score']
 
         with torch.no_grad():
-            o_embeds = self.ac.embed(data['obs'])   
-            o_g, o_n_emb, o_g_emb = o_embeds
+            o_embeds = self.ac.embed(data['obs'])
             cands = self.ac.embed(self.ac.pi.cand)
 
-        _, (ac_prob, log_ac_prob), ac = \
-            self.ac.pi(o_g_emb, o_n_emb, o_g, cands)
+        _, (ac_prob, log_ac_prob), ac, ac_emb = \
+            self.ac.pi(o_embeds, cands)
 
-        q1_pi = self.ac.q1(o_g_emb, *ac)
-        q2_pi = self.ac.q2(o_g_emb, *ac)
+        q1_pi = self.ac.q1(o_embeds[2], ac_emb)
+        q2_pi = self.ac.q2(o_embeds[2], ac_emb)
         q_pi = torch.min(q1_pi, q2_pi)
 
         
@@ -518,6 +502,7 @@ class sac:
         # Finally, update target networks by polyak averaging.
 
         with torch.no_grad():
+            # TODO: error here
             self.ac_targ.load_state_dict(self.ac.state_dict())
             for p, p_targ in zip(self.ac.parameters(), self.ac_targ.parameters()):
                 # NB: We use an in-place operations "mul_", "add_" to update target
@@ -546,16 +531,15 @@ class sac:
             with torch.no_grad():
                 cands = self.ac.embed(self.ac.pi.cand)
                 o_embeds = self.ac.embed([o])
-                o_g, o_n_emb, o_g_emb = o_embeds
 
                 if t > self.start_steps:
-                    ac, (ac_prob, log_ac_prob), (ac_first, ac_second, ac_third) = \
-                    self.ac.pi(o_g_emb, o_n_emb, o_g, cands)
-                    print(ac, ' pi')
+                    ac, (ac_prob, log_ac_prob), _, ac_emb = \
+                    self.ac.pi(o_embeds, cands)
+                    # print(ac, ' pi')
                 else:
                     ac = self.env.sample_motif()[np.newaxis]
-                    (ac_prob, log_ac_prob), (ac_first, ac_second, ac_third) = \
-                    self.ac.pi.sample(ac[0], o_g_emb, o_n_emb, o_g, cands)
+                    (ac_prob, log_ac_prob), ac_emb = \
+                    self.ac.pi.sample(ac[0], o_embeds, cands)
                     print(ac, 'sample')
 
             # Step the env
@@ -563,25 +547,25 @@ class sac:
 
             if d and self.active_learning is not None:
                 ob_list.append(o)
-                o_embed_list.append(o_g_emb)
+                o_embed_list.append(o_embeds[2])
 
 
             # Store experience to replay buffer
 
             # # Acquire sampling scores
             with torch.no_grad():
-                q_pred = min(self.ac.q1(o_g_emb, ac_first, ac_second, ac_third),\
-                            self.ac.q2(o_g_emb, ac_first, ac_second, ac_third))
+                q_pred = min(self.ac.q1(o_embeds[2], ac_emb),\
+                            self.ac.q2(o_embeds[2], ac_emb))
                 intr_rew = self.compute_intr_rew([o], q_pred)
             
             if type(ac) == np.ndarray:
                 self.replay_buffer.store(o, ac, r, o2, d, 
-                                        ac_prob, log_ac_prob, ac_first, ac_second, ac_third,
-                                        o_embeds, intr_rew)
+                                        ac_prob, log_ac_prob, ac_emb,
+                                        intr_rew)
             else:    
                 self.replay_buffer.store(o, ac.detach().cpu().numpy(), r, o2, d, 
-                                        ac_prob, log_ac_prob, ac_first, ac_second, ac_third,
-                                        o_embeds, intr_rew)
+                                        ac_prob, log_ac_prob, ac_emb,
+                                        intr_rew)
 
             # Super critical, easy to overlook step: make sure to update 
             # most recent observation!
@@ -659,8 +643,8 @@ class sac:
                     with torch.no_grad():
                         _, _, o_g_pred = self.ac.embed(batch['obs'])
                         q_pred = torch.min(torch.stack(
-                                    [self.ac.q1(o_g_pred, batch['ac_first'], batch['ac_second'], batch['ac_third']),
-                                    self.ac.q2(o_g_pred, batch['ac_first'], batch['ac_second'], batch['ac_third'])], dim=0)
+                                    [self.ac.q1(o_g_pred, batch['ac_emb']),
+                                    self.ac.q2(o_g_pred, batch['ac_emb'])], dim=0)
                                     , dim=0)[0].squeeze()
                         priorities = self.compute_intr_rew(batch['obs'], q_pred) * \
                                         (-batch['done'].float().cpu().numpy()+1) + \
