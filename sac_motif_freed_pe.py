@@ -228,9 +228,9 @@ class sac:
         self.polyak = polyak
         self.num_test_episodes = num_test_episodes
         self.writer = writer
-        self.fname = '/mnt/2tb/experiments/freed/fork/rewrite_qfunc/molecule_gen/'+args.name_full+'.csv'
-        self.test_fname = '/mnt/2tb/experiments/freed/fork/rewrite_qfunc/molecule_gen/'+args.name_full+'_test.csv'
-        self.save_name = '/mnt/2tb/experiments/freed/fork/rewrite_qfunc/ckpt/' + args.name_full + '_'
+        self.fname = '/mnt/2tb/experiments/freed/fork/simple_qfunc/molecule_gen/'+args.name_full+'.csv'
+        self.test_fname = '/mnt/2tb/experiments/freed/fork/simple_qfunc/molecule_gen/'+args.name_full+'_test.csv'
+        self.save_name = '/mnt/2tb/experiments/freed/fork/simple_qfunc/ckpt/' + args.name_full + '_'
         self.steps_per_epoch = steps_per_epoch
         self.epochs = epochs
         self.batch_size = batch_size

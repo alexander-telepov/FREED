@@ -167,7 +167,6 @@ class GCNQFunction(nn.Module):
     def __init__(self, args, override_seed=False):
         super().__init__()
         d = args.emb_size
-        self.d = d
         device = args.device
 
         if override_seed:
@@ -178,28 +177,17 @@ class GCNQFunction(nn.Module):
                 torch.cuda.manual_seed(seed)
                 torch.cuda.manual_seed_all(seed)
         
-        for i in range(1, 4):
-            setattr(self, f'action{i}_layers', nn.ModuleList([nn.Bilinear(2 * d if i == 2 else d, 2 * d if i == 1 else d, d).to(device),
-                                    nn.Linear(2 * d if i == 2 else d, d, bias=False).to(device),
-                                    nn.Linear(2 * d if i == 1 else d, d, bias=False).to(device),
-                                    nn.Sequential(
-                                    nn.Linear(d, d // 2, bias=False),
-                                    nn.LayerNorm(d // 2),
-                                    nn.ReLU(inplace=False),
-                                    nn.Linear(d // 2, 1, bias=True)).to(device)]))
+        self.qpred_layer = nn.Sequential(
+                            nn.Linear(6 * d, 2 * d, bias=False),
+                            nn.LayerNorm(2 * d),
+                            nn.ReLU(inplace=False),
+                            nn.Linear(2 * d, d, bias=False),
+                            nn.LayerNorm(d),
+                            nn.ReLU(inplace=False),
+                            nn.Linear(d, 1, bias=True)).to(device)
     
     def forward(self, graph_emb, ac_emb):
-        q_value = list()
-        d = self.d
-        q_emb = graph_emb
-        
-        for i, ac_emb in enumerate(torch.split(ac_emb, [d, 2 * d, d], dim=1), 1):
-            ac_layers = getattr(self, f'action{i}_layers')
-            q_emb = ac_layers[0](ac_emb, q_emb) + ac_layers[1](ac_emb) \
-                        + ac_layers[2](q_emb)
-            q_value.append(ac_layers[3](q_emb))
-
-        return torch.prod(torch.stack(q_value, dim=0), dim=0)
+        return self.qpred_layer(torch.cat([graph_emb, ac_emb], dim=1))
 
 
 LOG_STD_MAX = 2
