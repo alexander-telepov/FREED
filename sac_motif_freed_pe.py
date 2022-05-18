@@ -360,7 +360,6 @@ class sac:
 
         o_emb = self.ac.embed(o)
         q1 = self.ac.q1(o_emb[2], ac_emb).squeeze()
-        # TODO: here was .detach()
         q2 = self.ac.q2(o_emb[2], ac_emb).squeeze()
 
         # Target actions come from *current* policy
@@ -489,8 +488,6 @@ class sac:
         # Finally, update target networks by polyak averaging.
 
         with torch.no_grad():
-            # TODO: error here
-            self.ac_targ.load_state_dict(self.ac.state_dict())
             for p, p_targ in zip(self.ac.parameters(), self.ac_targ.parameters()):
                 # NB: We use an in-place operations "mul_", "add_" to update target
                 # params, as opposed to "mul" and "add", which would make new tensors.
