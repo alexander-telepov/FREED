@@ -385,8 +385,8 @@ class sac:
         loss_q2 = ((q2 - backup)**2*sampling_score).mean()
         loss_q = loss_q1 + loss_q2
         print('Q loss', loss_q1, loss_q2)
-        print('Q entropy', entropy)
-        print('Q target', q_pi_targ)
+        print('Q entropy', entropy.mean())
+        print('Q target', q_pi_targ.mean())
 
         return loss_q
 
@@ -416,7 +416,7 @@ class sac:
         loss_alpha = self.log_alpha.to(self.device) * (sampling_score * \
             (entropy - self.target_entropy).detach()).mean()
         
-        print('policy entropy', entropy)
+        print('policy entropy', entropy.mean())
         print('loss policy', loss_policy)
         print('loss alpha', loss_alpha)
 
