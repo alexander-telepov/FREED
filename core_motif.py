@@ -24,6 +24,7 @@ from gym_molecule.envs.env_utils_graph import ATOM_VOCAB, FRAG_VOCAB, FRAG_VOCAB
 from descriptors import ecfp, rdkit_descriptors
 from core_motif_mc import GCNEmbed_MC
 
+from functools import partial
 
 def combined_shape(length, shape=None):
     if shape is None:
@@ -41,6 +42,11 @@ def reduce_mean(nodes):
 def reduce_sum(nodes):
     accum = torch.sum(nodes.mailbox['m'], 1)
     return {'x': accum}  
+
+def print_grad(grad, name=''):
+    print(name + '_grad')
+    print(grad.abs().mean().item())
+    print(grad.abs().max().item())
 
 class GCN(nn.Module):
     def __init__(self, in_channels, out_channels, dropout=0., agg="sum", is_normalize=False, residual=True):
@@ -284,7 +290,7 @@ class SFSPolicy(nn.Module):
             ret = y_soft
         return ret
 
-    def forward(self, mol, cands, deterministic=False):
+    def forward(self, mol, cands, deterministic=False, t=None, j=-1, loss='q'):
         """
         graph_emb : bs x hidden_dim
         node_emb : (bs x num_nodes) x hidden_dim)
@@ -324,15 +330,43 @@ class SFSPolicy(nn.Module):
         att_emb = self.action1_layers[0](att_emb, graph_expand) + self.action1_layers[1](att_emb) \
                     + self.action1_layers[2](graph_expand)
         logits_first = self.action1_layers[3](att_emb)
+        if logits_first.requires_grad:
+            logits_first.retain_grad()
+            logits_first.register_hook(partial(print_grad, name='logits_first'))
+        print('logits_first', logits_first.isnan().sum(), logits_first.norm().mean())
+        if j >= 0:
+            np.save(f'/mnt/2tb/experiments/freed/fork/simple_qfunc/tensors/logits_first/{loss}/{str(j).zfill(3)}', logits_first.detach().cpu().numpy())
+        print('att_emb', att_emb.norm(dim=-1).mean().item())
 
         if g.batch_size != 1:
-            ac_first_prob = [torch.softmax(logit, dim=0)
-                            for i, logit in enumerate(torch.split(logits_first, att_len, dim=0))]
-            log_ac_first_prob = [x.log() for x in ac_first_prob]
+            # ac_first_prob = [torch.softmax(logit, dim=0)
+            #                 for i, logit in enumerate(torch.split(logits_first, att_len, dim=0))]
+            ac_first_prob = list()
+            for i, logit in enumerate(torch.split(logits_first, att_len, dim=0)):
+                ac_first_prob_i = torch.softmax(logit, dim=0)
+                if ac_first_prob_i.requires_grad:
+                    ac_first_prob_i.retain_grad()
+                    ac_first_prob_i.register_hook(partial(print_grad, name=f'ac_first_prob_{i}'))
+                ac_first_prob.append(ac_first_prob_i)
+
+            # log_ac_first_prob = [x.log() for x in ac_first_prob]
+            log_ac_first_prob = list()
+            for i, x in enumerate(ac_first_prob):
+                x_i = x.log()
+                if x_i.requires_grad:
+                    x_i.retain_grad()
+                    x_i.register_hook(partial(print_grad, name=f'log_ac_first_prob_{i}'))
+                log_ac_first_prob.append(x_i)
 
         else:
             ac_first_prob = torch.softmax(logits_first, dim=0)
+            if ac_first_prob.requires_grad:
+                ac_first_prob.retain_grad()
+                ac_first_prob.register_hook(partial(print_grad, name='ac_first_prob'))
             log_ac_first_prob = ac_first_prob.log()
+            if log_ac_first_prob.requires_grad:
+                log_ac_first_prob.retain_grad()
+                log_ac_first_prob.register_hook(partial(print_grad, name='log_ac_first_prob'))
 
         if g.batch_size != 1:  
             first_stack = []
@@ -367,6 +401,16 @@ class SFSPolicy(nn.Module):
                                         , 0).contiguous().view(1,self.max_action)
                                 for i, ac_first_hot_i in enumerate(ac_first_hot)], dim=0).contiguous()
             
+
+            if log_ac_first_prob.requires_grad:
+                log_ac_first_prob.retain_grad()
+                log_ac_first_prob.register_hook(partial(print_grad, name='log_ac_first_prob_cat'))
+
+
+            if ac_first_hot.requires_grad:
+                ac_first_hot.retain_grad()
+                ac_first_hot.register_hook(partial(print_grad, name='ac_first_hot'))
+            
             
         else:            
             ac_first_hot = self.gumbel_softmax(log_ac_first_prob, tau=self.tau, hard=True, dim=0).transpose(0,1)
@@ -381,6 +425,14 @@ class SFSPolicy(nn.Module):
             ac_first_hot = torch.cat([ac_first_hot, ac_first_hot.new_zeros(
                             1, max(self.max_action - ac_first_hot.size(1),0))]
                                 , 1).contiguous().view(1,self.max_action)
+            
+            if log_ac_first_prob.requires_grad:
+                log_ac_first_prob.retain_grad()
+                log_ac_first_prob.register_hook(partial(print_grad, name='log_ac_first_prob_cat'))
+                
+            if ac_first_hot.requires_grad:
+                ac_first_hot.retain_grad()
+                ac_first_hot.register_hook(partial(print_grad, name='ac_first_hot'))
 
         # =============================== 
         # step 2 : which motif to add - Using Descriptors
@@ -390,12 +442,27 @@ class SFSPolicy(nn.Module):
         
         emb_cat = self.action2_layers[0](cand_expand, emb_first_expand) + \
                     self.action2_layers[1](cand_expand) + self.action2_layers[2](emb_first_expand)
+        
+        if emb_cat.requires_grad:
+            emb_cat.retain_grad()
+            emb_cat.register_hook(partial(print_grad, name='emb_cat'))
+        print('emb_cat', emb_cat.norm(dim=-1).mean().item())
 
         logit_second = self.action2_layers[3](emb_cat).squeeze(-1)
+        if logit_second.requires_grad:
+            logit_second.retain_grad()
+            logit_second.register_hook(partial(print_grad, name='logit_second'))
+        print('logit_second', logit_second.isnan().sum())
         ac_second_prob = F.softmax(logit_second, dim=-1)
+        if ac_second_prob.requires_grad:
+            ac_second_prob.retain_grad()
+            ac_second_prob.register_hook(partial(print_grad, name='ac_second_prob'))
         log_ac_second_prob = ac_second_prob.log()
         
-        ac_second_hot = self.gumbel_softmax(log_ac_second_prob, tau=self.tau, hard=True)   
+        ac_second_hot = self.gumbel_softmax(log_ac_second_prob, tau=self.tau, hard=True)
+        if ac_second_hot.requires_grad:
+            ac_second_hot.retain_grad()
+            ac_second_hot.register_hook(partial(print_grad, name='ac_second_hot'))
         emb_second = torch.matmul(ac_second_hot, cand_graph_emb)
         ac_second = torch.argmax(ac_second_hot, dim=-1)
                                 
@@ -422,6 +489,7 @@ class SFSPolicy(nn.Module):
                   + self.action3_layers[2](ac3_cand_emb)
         
         logits_third = self.action3_layers[3](emb_cat_ac3)
+        print('logits_third', logits_third.isnan().sum())
 
         # predict logit
         if g.batch_size != 1:
@@ -464,6 +532,9 @@ class SFSPolicy(nn.Module):
                                     (1, self.max_action - ac_third_hot_i.size(1)))]
                                         , dim=1).contiguous().view(1,self.max_action)
                                 for i, ac_third_hot_i in enumerate(ac_third_hot)], dim=0).contiguous()
+            if ac_third_hot.requires_grad:
+                ac_third_hot.retain_grad()
+                ac_third_hot.register_hook(partial(print_grad, name='ac_third_hot'))
             
 
         else:
@@ -480,6 +551,9 @@ class SFSPolicy(nn.Module):
             ac_third_hot = torch.cat([ac_third_hot, ac_third_hot.new_zeros(
                                         1, self.max_action - ac_third_hot.size(1))] 
                                 , -1).contiguous()
+            if ac_third_hot.requires_grad:
+                ac_third_hot.retain_grad()
+                ac_third_hot.register_hook(partial(print_grad, name='ac_third_hot'))
 
         # ==== concat everything ====
 

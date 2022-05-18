@@ -337,6 +337,31 @@ class sac:
 
         tm = time.localtime(time.time())
         self.init_tm = time.strftime('_%Y-%m-%d_%I:%M:%S-%p', tm)
+        self.j = 0
+        import os
+        os.mkdir('/mnt/2tb/experiments/freed/fork/simple_qfunc/tensors')
+        os.mkdir('/mnt/2tb/experiments/freed/fork/simple_qfunc/tensors/ac')
+        os.mkdir('/mnt/2tb/experiments/freed/fork/simple_qfunc/tensors/log_prob')
+        os.mkdir('/mnt/2tb/experiments/freed/fork/simple_qfunc/tensors/prob')
+        os.mkdir('/mnt/2tb/experiments/freed/fork/simple_qfunc/tensors/ac/pi')
+        os.mkdir('/mnt/2tb/experiments/freed/fork/simple_qfunc/tensors/ac/q')
+        os.mkdir('/mnt/2tb/experiments/freed/fork/simple_qfunc/tensors/log_prob/pi')
+        os.mkdir('/mnt/2tb/experiments/freed/fork/simple_qfunc/tensors/log_prob/q')
+        os.mkdir('/mnt/2tb/experiments/freed/fork/simple_qfunc/tensors/prob/pi')
+        os.mkdir('/mnt/2tb/experiments/freed/fork/simple_qfunc/tensors/prob/q')
+        os.mkdir('/mnt/2tb/experiments/freed/fork/simple_qfunc/tensors/logits_first')
+        os.mkdir('/mnt/2tb/experiments/freed/fork/simple_qfunc/tensors/logits_first/pi')
+        os.mkdir('/mnt/2tb/experiments/freed/fork/simple_qfunc/tensors/logits_first/q')
+
+        for i in range(1, 4):
+            os.mkdir(f'/mnt/2tb/experiments/freed/fork/simple_qfunc/tensors/prob/q/ac_{i}')
+            os.mkdir(f'/mnt/2tb/experiments/freed/fork/simple_qfunc/tensors/ac/q/ac_{i}')
+            os.mkdir(f'/mnt/2tb/experiments/freed/fork/simple_qfunc/tensors/log_prob/q/ac_{i}')
+            os.mkdir(f'/mnt/2tb/experiments/freed/fork/simple_qfunc/tensors/prob/pi/ac_{i}')
+            os.mkdir(f'/mnt/2tb/experiments/freed/fork/simple_qfunc/tensors/ac/pi/ac_{i}')
+            os.mkdir(f'/mnt/2tb/experiments/freed/fork/simple_qfunc/tensors/log_prob/pi/ac_{i}')
+
+
 
     def compute_entropy(self, log_ac_prob, ac, eps=1e-8):
         bs = ac[0].size(0)
@@ -370,12 +395,17 @@ class sac:
         with torch.no_grad():
             o2_emb = self.ac.embed(o2)
             cands = self.ac.embed(self.ac.pi.cand)
-            a2, (a2_prob, log_a2_prob), ac2, ac2_emb = self.ac.pi(o2_emb, cands)
+            a2, (a2_prob, log_a2_prob), ac2, ac2_emb = self.ac.pi(o2_emb, cands, j=self.j, loss='q')
             # Target Q-values
             q1_pi_targ = self.ac_targ.q1(o2_emb[2], ac2_emb)
             q2_pi_targ = self.ac_targ.q2(o2_emb[2], ac2_emb)
             q_pi_targ = torch.min(q1_pi_targ, q2_pi_targ).squeeze()
             entropy = self.compute_entropy(log_a2_prob, ac2)
+            for i, (_prob, _log_prob, _ac) in enumerate(zip(torch.split(a2_prob, self.action_dims, dim=1), torch.split(log_a2_prob, self.action_dims, dim=1), ac2_emb), 1):
+                np.save(f'/mnt/2tb/experiments/freed/fork/simple_qfunc/tensors/ac/q/ac_{i}/{str(self.j).zfill(3)}', _ac.detach().cpu().numpy())
+                np.save(f'/mnt/2tb/experiments/freed/fork/simple_qfunc/tensors/log_prob/q/ac_{i}/{str(self.j).zfill(3)}', _log_prob.detach().cpu().numpy())
+                np.save(f'/mnt/2tb/experiments/freed/fork/simple_qfunc/tensors/prob/q/ac_{i}/{str(self.j).zfill(3)}', _prob.detach().cpu().numpy())
+                # np.save(f'/mnt/2tb/experiments/freed/fork/simple_qfunc/tensors/shifted_log_prob/{self.save_cnt}', shifted_log_prob.detach().cpu().numpy())
             alpha = np.clip(self.log_alpha.exp().item(), self.alpha_min, self.alpha_max)
             backup = r + self.gamma * (1 - d) * (q_pi_targ + alpha * entropy)
 
@@ -385,8 +415,8 @@ class sac:
         loss_q2 = ((q2 - backup)**2*sampling_score).mean()
         loss_q = loss_q1 + loss_q2
         print('Q loss', loss_q1, loss_q2)
-        print('Q entropy', entropy)
-        print('Q target', q_pi_targ)
+        print('Q entropy', entropy.mean())
+        print('Q target', q_pi_targ.mean())
 
         return loss_q
 
@@ -399,7 +429,7 @@ class sac:
             cands = self.ac.embed(self.ac.pi.cand)
 
         _, (ac_prob, log_ac_prob), ac, ac_emb = \
-            self.ac.pi(o_embeds, cands)
+            self.ac.pi(o_embeds, cands,j=self.j, loss='pi')
 
         q1_pi = self.ac.q1(o_embeds[2], ac_emb)
         q2_pi = self.ac.q2(o_embeds[2], ac_emb)
@@ -420,12 +450,17 @@ class sac:
         ent_weight = [1, 1, 1]
         # get ac1 x ac2 x ac3 
         
+        for i, (_prob, _log_prob, _ac) in enumerate(zip(torch.split(ac_prob, self.action_dims, dim=1), torch.split(log_ac_prob, self.action_dims, dim=1), ac), 1):
+            np.save(f'/mnt/2tb/experiments/freed/fork/simple_qfunc/tensors/ac/pi/ac_{i}/{str(self.j).zfill(3)}', _ac.detach().cpu().numpy())
+            np.save(f'/mnt/2tb/experiments/freed/fork/simple_qfunc/tensors/log_prob/pi/ac_{i}/{str(self.j).zfill(3)}', _log_prob.detach().cpu().numpy())
+            np.save(f'/mnt/2tb/experiments/freed/fork/simple_qfunc/tensors/prob/pi/ac_{i}/{str(self.j).zfill(3)}', _prob.detach().cpu().numpy())
+
         entropy = self.compute_entropy(log_ac_prob, ac)
         loss_entropy = -alpha * (sampling_score * entropy).mean()
         loss_alpha = self.log_alpha.to(self.device) * (sampling_score * \
             (entropy - self.target_entropy).detach()).mean()
         
-        print('policy entropy', entropy)
+        print('policy entropy', entropy.mean())
         print('loss policy', loss_policy)
         print('loss entropy', loss_entropy)
         print('loss alpha', loss_alpha)
@@ -451,13 +486,36 @@ class sac:
             rew_intr = torch.abs(pred - rew).cpu().detach().numpy()
         return rew_intr
     
+    def print_norms(self, type='layer', nets=None):
+        if type == 'layer':
+            print('___ Layer ___')
+            print('------ ac ------')
+            for name, param in self.ac.named_parameters():
+                print(name, param.data.norm().item())
+            
+            # print('--- ac_targ ---')
+            # for name, param in self.ac_targ.named_parameters():
+            #     print(name, param.data.norm().item())
+            
+            print('---------------')
+        else:
+            print('___ Grad ___')
+            print('------ ac ------')
+            for net in nets:
+                for name, param in net.named_parameters():
+                    print(name, param.grad.abs().mean().item())
+            print('---------------')
+
     def update(self, data):
+        print('--- j ---', self.j)
+        self.print_norms()
         # First run one gradient descent step for Q1 and Q2
         ave_pi_grads, ave_q_grads = [], []
 
         loss_q = self.compute_loss_q(data)
         self.q_optimizer.zero_grad()
         loss_q.backward()
+        self.print_norms(type='', nets=[self.ac.q1, self.ac.q2, self.ac.embed])
         clip_grad_norm_(self.q_params, 5)
         for q in list(self.q_params):
             ave_q_grads.append(q.grad.abs().mean().item())
@@ -474,6 +532,7 @@ class sac:
         loss_pi = loss_entropy + loss_policy
         self.pi_optimizer.zero_grad()
         loss_pi.backward()
+        self.print_norms(type='', nets=[self.ac.pi])
         clip_grad_norm_(self.pi_params, 5)
         for p in self.pi_params:
             ave_pi_grads.append(p.grad.abs().mean().item())
@@ -509,6 +568,8 @@ class sac:
                 # params, as opposed to "mul" and "add", which would make new tensors.
                 p_targ.data.mul_(self.polyak)
                 p_targ.data.add_((1 - self.polyak) * p.data)
+        
+        self.j += 1
 
     def get_action(self, o, deterministic=False):
         return self.ac.act(o, deterministic)
