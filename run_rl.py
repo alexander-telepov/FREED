@@ -256,14 +256,14 @@ def main():
     args.ratios = ratios
     
     # check and clean
-    if not os.path.exists('/mnt/2tb/experiments/freed/fork/simple_qfunc/molecule_gen'):
-        os.makedirs('/mnt/2tb/experiments/freed/fork/simple_qfunc/molecule_gen')
-    if not os.path.exists('/mnt/2tb/experiments/freed/fork/simple_qfunc/ckpt'):
-        os.makedirs('/mnt/2tb/experiments/freed/fork/simple_qfunc/ckpt')
-    if not os.path.exists('/mnt/2tb/experiments/freed/fork/simple_qfunc/logs'):
-        os.makedirs('/mnt/2tb/experiments/freed/fork/simple_qfunc/logs')
+    if not os.path.exists('/mnt/2tb/experiments/freed/fork/replace_gumbel/molecule_gen'):
+        os.makedirs('/mnt/2tb/experiments/freed/fork/replace_gumbel/molecule_gen')
+    if not os.path.exists('/mnt/2tb/experiments/freed/fork/replace_gumbel/ckpt'):
+        os.makedirs('/mnt/2tb/experiments/freed/fork/replace_gumbel/ckpt')
+    if not os.path.exists('/mnt/2tb/experiments/freed/fork/replace_gumbel/logs'):
+        os.makedirs('/mnt/2tb/experiments/freed/fork/replace_gumbel/logs')
 
-    writer = SummaryWriter('/mnt/2tb/experiments/freed/fork/simple_qfunc/logs', comment='_'+args.name)
+    writer = SummaryWriter('/mnt/2tb/experiments/freed/fork/replace_gumbel/logs', comment='_'+args.name)
 
     # device
     gpu_use = False

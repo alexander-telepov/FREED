@@ -228,9 +228,9 @@ class sac:
         self.polyak = polyak
         self.num_test_episodes = num_test_episodes
         self.writer = writer
-        self.fname = '/mnt/2tb/experiments/freed/fork/simple_qfunc/molecule_gen/'+args.name_full+'.csv'
-        self.test_fname = '/mnt/2tb/experiments/freed/fork/simple_qfunc/molecule_gen/'+args.name_full+'_test.csv'
-        self.save_name = '/mnt/2tb/experiments/freed/fork/simple_qfunc/ckpt/' + args.name_full + '_'
+        self.fname = '/mnt/2tb/experiments/freed/fork/replace_gumbel/molecule_gen/'+args.name_full+'.csv'
+        self.test_fname = '/mnt/2tb/experiments/freed/fork/replace_gumbel/molecule_gen/'+args.name_full+'_test.csv'
+        self.save_name = '/mnt/2tb/experiments/freed/fork/replace_gumbel/ckpt/' + args.name_full + '_'
         self.steps_per_epoch = steps_per_epoch
         self.epochs = epochs
         self.batch_size = batch_size
@@ -338,15 +338,15 @@ class sac:
         tm = time.localtime(time.time())
         self.init_tm = time.strftime('_%Y-%m-%d_%I:%M:%S-%p', tm)
 
-    def compute_entropy(self, log_ac_prob, ac, eps=1e-8):
+    def log_prob(self, log_ac_prob, ac, eps=1e-8):
         bs = ac[0].size(0)
-        entropy = list()
+        log_p = list()
         for log_prob, ac in zip(torch.split(log_ac_prob, self.action_dims, dim=1), ac):
             masked_log_prob = log_prob.masked_fill(log_prob.isinf(), 0)
             shifted_log_prob = (masked_log_prob.exp() + eps).log()
-            entropy.append((shifted_log_prob.view(bs, 1, -1) @ ac.view(bs, -1, 1)).squeeze(-1))
+            log_p.append((shifted_log_prob.view(bs, 1, -1) @ ac.view(bs, -1, 1)).squeeze(-1))
 
-        return - torch.sum(torch.stack(entropy, dim=0), dim=0)
+        return torch.sum(torch.stack(log_p, dim=0), dim=0)
 
     def compute_loss_q(self, data):
 
@@ -375,7 +375,7 @@ class sac:
             q1_pi_targ = self.ac_targ.q1(o2_emb[2], ac2_emb)
             q2_pi_targ = self.ac_targ.q2(o2_emb[2], ac2_emb)
             q_pi_targ = torch.min(q1_pi_targ, q2_pi_targ).squeeze()
-            entropy = self.compute_entropy(log_a2_prob, ac2)
+            entropy = - self.log_prob(log_a2_prob, ac2)
             alpha = np.clip(self.log_alpha.exp().item(), self.alpha_min, self.alpha_max)
             backup = r + self.gamma * (1 - d) * (q_pi_targ + alpha * entropy)
 
@@ -405,29 +405,19 @@ class sac:
         q2_pi = self.ac.q2(o_embeds[2], ac_emb)
         q_pi = torch.min(q1_pi, q2_pi)
 
-        
-        # loss_policy = torch.mean(-q_pi)      
-        loss_policy = torch.mean(-q_pi*sampling_score)         
+        log_ac_prob = self.log_prob(log_ac_prob, ac)
+
+        # loss_policy = torch.mean(-q_pi)
+        alpha = np.clip(self.log_alpha.exp().item(), self.alpha_min, self.alpha_max)      
+        loss_policy = torch.mean(log_ac_prob * (log_ac_prob / 2 - q_pi / alpha) * sampling_score)
 
         # Entropy-regularized policy loss
-        alpha = np.clip(self.log_alpha.exp().item(), self.alpha_min, self.alpha_max)
-
-        loss_entropy = 0
-        loss_alpha = 0
-        # # OG version
-
-        # New version
-        ent_weight = [1, 1, 1]
-        # get ac1 x ac2 x ac3 
-        
-        entropy = self.compute_entropy(log_ac_prob, ac)
-        loss_entropy = -alpha * (sampling_score * entropy).mean()
+        entropy = - log_ac_prob
         loss_alpha = self.log_alpha.to(self.device) * (sampling_score * \
             (entropy - self.target_entropy).detach()).mean()
         
         print('policy entropy', entropy)
         print('loss policy', loss_policy)
-        print('loss entropy', loss_entropy)
         print('loss alpha', loss_alpha)
 
         # Record things
@@ -435,7 +425,7 @@ class sac:
             self.writer.add_scalar("Entropy", entropy.mean().item(), self.iter_so_far)
             self.writer.add_scalar("Alpha", alpha, self.iter_so_far)
 
-        return loss_entropy, loss_policy, loss_alpha
+        return loss_policy, loss_alpha
 
     def compute_intr_loss_rew(self, ob, rew):
         pred = self.ac.p(ob).squeeze()
@@ -470,10 +460,9 @@ class sac:
         for q in self.q_params:
             q.requires_grad = False
 
-        loss_entropy, loss_policy, loss_alpha = self.compute_loss_pi(data)
-        loss_pi = loss_entropy + loss_policy
+        loss_policy, loss_alpha = self.compute_loss_pi(data)
         self.pi_optimizer.zero_grad()
-        loss_pi.backward()
+        loss_policy.backward()
         clip_grad_norm_(self.pi_params, 5)
         for p in self.pi_params:
             ave_pi_grads.append(p.grad.abs().mean().item())
@@ -494,9 +483,7 @@ class sac:
         # Record things
         if self.writer is not None:
             self.writer.add_scalar("loss_Q", loss_q.item(), self.iter_so_far)
-            self.writer.add_scalar("loss_Pi", loss_pi.item(), self.iter_so_far)
-            self.writer.add_scalar("loss_Policy", loss_policy.item(), self.iter_so_far)
-            self.writer.add_scalar("loss_Ent", loss_entropy.item(), self.iter_so_far)
+            self.writer.add_scalar("loss_Pi", loss_policy.item(), self.iter_so_far)
             self.writer.add_scalar("loss_alpha", loss_alpha.item(), self.iter_so_far)
 
         # Finally, update target networks by polyak averaging.

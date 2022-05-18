@@ -267,7 +267,7 @@ class SFSPolicy(nn.Module):
 
 
     def gumbel_softmax(self, logits: torch.Tensor, tau: float = 1, hard: bool = False, eps: float = 1e-10, dim: int = -1, \
-                    g_ratio: float = 1.) -> torch.Tensor:
+                    g_ratio: float = 1., stop_grads=True) -> torch.Tensor:
         gumbels = (
             -torch.empty_like(logits, memory_format=torch.legacy_contiguous_format).exponential_().log()
         )  # ~Gumbel(0,1)
@@ -282,7 +282,7 @@ class SFSPolicy(nn.Module):
         else:
             # Reparametrization trick.
             ret = y_soft
-        return ret
+        return ret.detach() if stop_grads else ret
 
     def forward(self, mol, cands, deterministic=False):
         """
