@@ -1,7 +1,7 @@
 import time
 from copy import deepcopy
 import itertools
-
+import os
 import numpy as np
 from rdkit import Chem
 import pickle
@@ -280,6 +280,7 @@ class sac:
 
         self.ac.apply(xavier_uniform_init)
         # self.ac.apply(xavier_normal_init)
+        self.args = args
 
         tm = time.localtime(time.time())
         self.init_tm = time.strftime('_%Y-%m-%d_%I:%M:%S-%p', tm)
@@ -337,7 +338,7 @@ class sac:
 
         # Entropy-regularized policy loss
         alpha = min(self.log_alpha.exp().item(), 20.)
-        alpha = max(self.log_alpha.exp().item(), .05)
+        alpha = max(alpha, .05)
 
         loss_entropy = 0
         loss_alpha = 0
@@ -540,6 +541,9 @@ class sac:
 
             if t>1 and t % self.docking_every == 0 and self.env.smile_list != []:
                 n_smi = len(self.env.smile_list)
+                self.writer.add_scalar("mol count", n_smi, self.t)
+                self.writer.add_scalar("unique count", len(
+                    set(self.env.smile_list)), self.t)
                 print('=================== num smiles : ', n_smi)
                 print('=================== t : ', t)
                 if n_smi > 0:
@@ -576,13 +580,18 @@ class sac:
 
                     self.replay_buffer.rew_store(r_batch, self.docking_every)
 
-                    with open(self.fname[:-4]+self.init_tm+'.csv', 'a') as f:
+                    with open(os.path.join(self.args.mol_dir, 'molecules.csv'), 'a') as f:
                         for i in range(n_smi):
                             str = f'{self.env.smile_list[i]},{ext_rew[i]},{t}'+'\n'
                             f.write(str)
                     if self.writer:
                         n_nonzero_smi = np.count_nonzero(ext_rew)
-                        self.writer.add_scalar("EpRet", sum(ext_rew)/n_nonzero_smi, self.iter_so_far)
+                        self.writer.add_scalar(
+                            "zero count", n_smi - n_nonzero_smi, self.t)
+                        self.writer.add_scalar(
+                            "Max Docking reward", np.max(ext_rew), self.t)
+                        self.writer.add_scalar(
+                            "Mean Docking reward", np.mean(ext_rew), self.t)
                     self.env.reset_batch()
                     ep_len_batch = 0
 
@@ -593,6 +602,7 @@ class sac:
                     t_update = time.time()
                     self.update(data=batch)
                     dt_update = time.time()
+                    self.iter_so_far += 1
                     print('update time : ', j, dt_update-t_update)
             
             # End of epoch handling
@@ -600,10 +610,10 @@ class sac:
                 epoch = (t+1) // self.steps_per_epoch
 
             # Save model
-            if (t % self.save_freq == 0):
-                fname = self.save_name + f'{self.iter_so_far}'
+            if (t % self.save_freq == 0) or (t == (total_steps - 1)):
+                fname = os.path.join(self.args.model_dir, f'model_{t}.pth')
                 torch.save(self.ac.state_dict(), fname+"_rl")
                 print('model saved!',fname)
-            self.iter_so_far += 1
+
 
 

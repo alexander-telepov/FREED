@@ -72,7 +72,7 @@ def train(args,seed,writer=None):
 
     if args.rl_model == 'sac':
         SAC = sac(writer, args, env, actor_critic=GCNActorCritic, ac_kwargs=dict(), seed=seed, 
-            steps_per_epoch=500, epochs=100, replay_size=int(1e6), gamma=0.99, 
+            steps_per_epoch=500, epochs=args.epochs, replay_size=int(1e6), gamma=0.99, 
             # polyak=0.995, lr=args.init_lr, alpha=args.init_alpha, batch_size=args.batch_size, start_steps=128,    
             polyak=0.995, lr=args.init_lr, alpha=args.init_alpha, batch_size=args.batch_size, start_steps=args.start_steps,
             update_after=args.update_after, update_every=args.update_every, update_freq=args.update_freq, 
@@ -205,17 +205,26 @@ def molecule_arg_parser():
     # On-policy
     parser.add_argument('--n_cpus', type=int, default=1)
     parser.add_argument('--steps_per_epoch', type=int, default=257)
+
+
+    parser.add_argument('--pocket_id', type=int, choices=[0, 1])
+    parser.add_argument('--exp_root', type=str,
+                        default='/mnt/2tb/experiments/freed')
+    parser.add_argument('--epochs', type=int, default=40)
     
     return parser
 
 def main():
     args = molecule_arg_parser().parse_args()
+    args.name_full = f'molecule_{args.name}'
+    exp_dir = os.path.join(args.exp_root, args.name)
+    args.exp_dir = exp_dir
     print(args)
     args.name_full = args.env + '_' + args.name
 
     docking_config = dict()
     
-    assert args.target in ['fa7', 'parp1', '5ht1b'], "Wrong target type"
+    assert args.target in ['fa7', 'parp1', '5ht1b', 'usp7'], "Wrong target type"
     if args.target == 'fa7':
         box_center = (10.131, 41.879, 32.097)
         box_size = (20.673, 20.198, 21.362)
@@ -229,7 +238,17 @@ def main():
         box_size = (22.5, 22.5, 22.5)
         docking_config['receptor_file'] = 'ReLeaSE_Vina/docking/5ht1b/receptor.pdbqt'
         docking_config['temp_dir'] = '5ht1b_tmp'
+    elif args.target == 'usp7':
+        if args.pocket_id == 0:
+            box_center = (2.860, 4.819, 92.848)
+            box_size = (17.112, 17.038, 14.958)
+        elif args.pocket_id == 1:
+            box_center = (27.413, 1.55, 29.902)
+            box_size = (16.221, 16.995, 17.858)
+        docking_config['receptor_file'] = 'ReLeaSE_Vina/docking/usp7/receptor.pdbqt'
+        docking_config['temp_dir'] = 'usp7'
 
+    docking_config['temp_dir'] = os.path.join(exp_dir, 'tmp')
     box_parameter = (box_center, box_size)
     docking_config['vina_program'] = 'qvina02'
     docking_config['box_parameter'] = box_parameter
@@ -255,13 +274,17 @@ def main():
     args.docking_config = docking_config
     args.ratios = ratios
     
-    # check and clean
-    if not os.path.exists('molecule_gen'):
-        os.makedirs('molecule_gen')
-    if not os.path.exists('ckpt'):
-        os.makedirs('ckpt')
+    if os.path.exists(exp_dir):
+        raise ValueError(f'Experiment directory "{exp_dir}" already exist!')
+    else:
+        args.mol_dir = os.path.join(args.exp_dir, 'molecule_gen')
+        args.model_dir = os.path.join(args.exp_dir, 'ckpt')
+        args.logs_dir = os.path.join(args.exp_dir, 'logs')
+        os.makedirs(args.mol_dir)
+        os.makedirs(args.model_dir)
+        os.makedirs(args.logs_dir)
 
-    writer = SummaryWriter(comment='_'+args.name)
+    writer = SummaryWriter(args.logs_dir)
 
     # device
     gpu_use = False
