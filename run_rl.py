@@ -253,10 +253,7 @@ def main():
     docking_config['vina_program'] = 'qvina02'
     docking_config['box_parameter'] = box_parameter
     docking_config['temp_dir'] = 'tmp'
-    if args.train:
-        docking_config['exhaustiveness'] = 1
-    else: 
-        docking_config['exhaustiveness'] = 4
+    docking_config['exhaustiveness'] = 8
     docking_config['num_sub_proc'] = 10
     docking_config['num_cpu_dock'] = 5
     docking_config['num_modes'] = 10 
