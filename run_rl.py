@@ -259,8 +259,8 @@ def main():
     docking_config['num_sub_proc'] = 10
     docking_config['num_cpu_dock'] = 5
     docking_config['num_modes'] = 10 
-    docking_config['timeout_gen3d'] = 30
-    docking_config['timeout_dock'] = 100 
+    docking_config['timeout_gen3d'] = None
+    docking_config['timeout_dock'] = None 
     docking_config['seed'] = args.seed
 
     ratios = dict()
