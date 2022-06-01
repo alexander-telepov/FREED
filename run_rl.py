@@ -211,6 +211,7 @@ def molecule_arg_parser():
     parser.add_argument('--exp_root', type=str,
                         default='/mnt/2tb/experiments/freed')
     parser.add_argument('--epochs', type=int, default=40)
+    parser.add_argument('--local_rank', type=int, default=0)
     
     return parser
 
