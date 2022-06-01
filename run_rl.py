@@ -252,9 +252,8 @@ def main():
 
     docking_config['temp_dir'] = os.path.join(exp_dir, 'tmp')
     box_parameter = (box_center, box_size)
-    docking_config['vina_program'] = 'qvina02'
+    docking_config['vina_program'] = './bin/qvina02'
     docking_config['box_parameter'] = box_parameter
-    docking_config['temp_dir'] = 'tmp'
     docking_config['exhaustiveness'] = 8
     docking_config['num_sub_proc'] = 10
     docking_config['num_cpu_dock'] = 5
