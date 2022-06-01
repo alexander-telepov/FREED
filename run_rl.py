@@ -216,6 +216,7 @@ def molecule_arg_parser():
     return parser
 
 def main():
+    os.chdir(os.path.dirname(__file__))
     args = molecule_arg_parser().parse_args()
     args.name_full = f'molecule_{args.name}'
     exp_dir = os.path.join(args.exp_root, args.name)
