@@ -262,6 +262,7 @@ def main():
     docking_config['num_modes'] = 10 
     docking_config['timeout_gen3d'] = 30
     docking_config['timeout_dock'] = 100 
+    docking_config['seed'] = args.seed
 
     ratios = dict()
     ratios['logp'] = 0

@@ -40,6 +40,7 @@ class DockingVina(object):
         self.num_modes = docking_params['num_modes']
         self.timeout_gen3d = docking_params['timeout_gen3d']
         self.timeout_dock = docking_params['timeout_dock']
+        self.seed = docking_params['seed']
 
         if not os.path.exists(self.temp_dir):
             os.makedirs(self.temp_dir)
@@ -77,6 +78,7 @@ class DockingVina(object):
         run_line += ' --cpu %d' % (self.num_cpu_dock)
         run_line += ' --num_modes %d' % (self.num_modes)
         run_line += ' --exhaustiveness %d ' % (self.exhaustiveness)
+        run_line += ' --seed %d ' % (self.seed)
         result = subprocess.check_output(run_line.split(),
                                          stderr=subprocess.STDOUT,
                                          timeout=self.timeout_dock, universal_newlines=True)
