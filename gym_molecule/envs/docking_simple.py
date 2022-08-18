@@ -41,6 +41,7 @@ class DockingVina(object):
         self.timeout_gen3d = docking_params['timeout_gen3d']
         self.timeout_dock = docking_params['timeout_dock']
         self.seed = docking_params['seed']
+        self.results = dict()
 
         if not os.path.exists(self.temp_dir):
             os.makedirs(self.temp_dir)
@@ -166,30 +167,36 @@ class DockingVina(object):
             output affinity list corresponding to the SMILES list
             if docking is fail, docking score is 99.9
         """
-        data = list(enumerate(smiles_list))
-        q1 = Queue()
-        manager = Manager()
-        return_dict = manager.dict()
-        proc_master = Process(target=self.creator,
-                              args=(q1, data, self.num_sub_proc))
-        proc_master.start()
+        smiles_set = list(set(smiles_list) - set(self.results.keys()))
 
-        # create slave process
-        procs = []
-        for sub_id in range(0, self.num_sub_proc):
-            proc = Process(target=self.docking_subprocess,
-                           args=(q1, return_dict, sub_id))
-            procs.append(proc)
-            proc.start()
+        if smiles_set:
+            data = list(enumerate(smiles_set))
+            q1 = Queue()
+            manager = Manager()
+            return_dict = manager.dict()
+            proc_master = Process(target=self.creator,
+                                args=(q1, data, self.num_sub_proc))
+            proc_master.start()
 
-        q1.close()
-        q1.join_thread()
-        proc_master.join()
-        for proc in procs:
-            proc.join()
-        keys = sorted(return_dict.keys())
-        affinity_list = list()
-        for key in keys:
-            affinity = return_dict[key]
-            affinity_list += [affinity]
-        return affinity_list
+            # create slave process
+            procs = []
+            for sub_id in range(0, self.num_sub_proc):
+                proc = Process(target=self.docking_subprocess,
+                            args=(q1, return_dict, sub_id))
+                procs.append(proc)
+                proc.start()
+
+            q1.close()
+            q1.join_thread()
+            proc_master.join()
+            for proc in procs:
+                proc.join()
+            keys = sorted(return_dict.keys())
+            affinity_list = list()
+            for key in keys:
+                affinity = return_dict[key]
+                affinity_list += [affinity]
+            
+            self.results = {**self.results, **dict(zip(smiles_set, affinity_list))}
+        
+        return [self.results[smile] for smile in smiles_list]
