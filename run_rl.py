@@ -255,8 +255,8 @@ def main():
     docking_config['vina_program'] = './bin/qvina02'
     docking_config['box_parameter'] = box_parameter
     docking_config['exhaustiveness'] = 8
-    docking_config['num_sub_proc'] = 10
-    docking_config['num_cpu_dock'] = 5
+    docking_config['num_sub_proc'] = os.cpu_count()
+    docking_config['num_cpu_dock'] = 1
     docking_config['num_modes'] = 10 
     docking_config['timeout_gen3d'] = None
     docking_config['timeout_dock'] = None 
