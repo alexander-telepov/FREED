@@ -78,7 +78,10 @@ def train(args,seed,writer=None):
             update_after=args.update_after, update_every=args.update_every, update_freq=args.update_freq, 
             expert_every=5, num_test_episodes=8, max_ep_len=args.max_action, 
             save_freq=2000, train_alpha=True)
-        SAC.train()
+        if args.mode == 'train':
+            SAC.train()
+        elif args.mode =='eval':
+            SAC.eval(args.num_mols)
     
     elif args.rl_model == 'ppo':
         from mpi_tools import mpi_fork
@@ -109,7 +112,7 @@ def molecule_arg_parser():
     parser.add_argument('--rl_model', type=str, default='sac') # sac, td3, ddpg
 
     parser.add_argument('--gpu_id', type=int, default=None)
-    parser.add_argument('--train', type=int, default=1, help='training or inference')
+    parser.add_argument('--mode', type=str, default='train', choices=['train', 'eval'], help='training or inference')
     # env
     parser.add_argument('--env', type=str, help='environment name: molecule; graph', default='molecule')
     parser.add_argument('--seed', help='RNG seed', type=int, default=666)
@@ -212,6 +215,8 @@ def molecule_arg_parser():
                         default='/mnt/2tb/experiments/freed')
     parser.add_argument('--epochs', type=int, default=40)
     parser.add_argument('--local_rank', type=int, default=0)
+
+    parser.add_argument('--num_mols', type=int, default=500)
     
     return parser
 
@@ -273,15 +278,15 @@ def main():
     args.docking_config = docking_config
     args.ratios = ratios
     
-    if os.path.exists(exp_dir):
+    if os.path.exists(exp_dir) and args.load == 0:
         raise ValueError(f'Experiment directory "{exp_dir}" already exist!')
     else:
-        args.mol_dir = os.path.join(args.exp_dir, 'molecule_gen')
+        args.mol_dir = os.path.join(args.exp_dir, 'mols')
         args.model_dir = os.path.join(args.exp_dir, 'ckpt')
         args.logs_dir = os.path.join(args.exp_dir, 'logs')
-        os.makedirs(args.mol_dir)
-        os.makedirs(args.model_dir)
-        os.makedirs(args.logs_dir)
+        os.makedirs(args.mol_dir, exist_ok=True)
+        os.makedirs(args.model_dir, exist_ok=True)
+        os.makedirs(args.logs_dir, exist_ok=True)
 
     writer = SummaryWriter(args.logs_dir)
 

@@ -243,9 +243,6 @@ class sac:
         self.polyak = polyak
         self.num_test_episodes = num_test_episodes
         self.writer = writer
-        self.fname = 'molecule_gen/'+args.name_full+'.csv'
-        self.test_fname = 'molecule_gen/'+args.name_full+'_test.csv'
-        self.save_name = './ckpt/' + args.name_full + '_'
         self.steps_per_epoch = steps_per_epoch
         self.epochs = epochs
         self.batch_size = batch_size
@@ -636,7 +633,7 @@ class sac:
                     # self.replay_buffer.rew_store(r_batch, intr_rew, self.docking_every)
                     self.replay_buffer.rew_store(r_batch, intr_rew, self.docking_every)
 
-                    with open(os.path.join(self.args.mol_dir, 'molecules.csv'), 'a') as f:
+                    with open(os.path.join(self.args.mol_dir, 'train.csv'), 'a') as f:
                         for i in range(n_smi):
                             str = f'{self.env.smile_list[i]},{ext_rew[i]},{t}'+'\n'
                             f.write(str)
@@ -688,4 +685,29 @@ class sac:
                 print('model saved!',fname)
 
 
+    @torch.no_grad()
+    def eval(self, num_mols):
+        self.env.smile_list = list()
+        cands = self.ac.embed(self.ac.pi.cand)
+        for _ in range(num_mols):
+            o, d = self.env.reset(), False
+            while not d:
+                o_embeds = self.ac.embed([o])
+                o_g, o_n_emb, o_g_emb = o_embeds
+                ac, (ac_prob, log_ac_prob), (ac_first, ac_second, ac_third) = \
+                    self.ac.pi(o_g_emb, o_n_emb, o_g, cands)
+                o2, r, d, info = self.env.step(ac)
+                o = o2
 
+                if get_att_points(self.env.mol) == []:
+                    d = True
+                if not any(o2['att']):
+                    d = True
+
+        ext_rew = self.env.reward_batch()
+        with open(os.path.join(self.args.mol_dir, 'eval.csv'), 'a') as f:
+            for i in range(len(ext_rew)):
+                str = f'{self.env.smile_list[i]},{ext_rew[i]}'+'\n'
+                f.write(str)
+        
+        self.env.smile_list = list()
