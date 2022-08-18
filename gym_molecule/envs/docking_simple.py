@@ -120,7 +120,7 @@ class DockingVina(object):
         for i in range(0, num_sub_proc):
             q.put('DONE')
 
-    def docking_subprocess(self, q, return_dict, sub_id=0):
+    def docking_subprocess(self, q, return_dict, sub_id=0, n_conf=3):
         """
             generate subprocess for docking
             input
@@ -138,28 +138,29 @@ class DockingVina(object):
             ligand_mol_file = '%s/ligand_%s.mol' % (self.temp_dir, sub_id)
             ligand_pdbqt_file = '%s/ligand_%s.pdbqt' % (self.temp_dir, sub_id)
             docking_pdbqt_file = '%s/dock_%s.pdbqt' % (self.temp_dir, sub_id)
-            try:
-                self.gen_3d(smi, ligand_mol_file)
-            except Exception as e:
-                print(e)
-                print("gen_3d unexpected error:", sys.exc_info())
-                print("smiles: ", smi)
-                return_dict[idx] = 99.9
-                continue
-            try:
-                affinity_list = self.docking(receptor_file, ligand_mol_file,
-                                             ligand_pdbqt_file, docking_pdbqt_file)
-            except Exception as e:
-                print(e)
-                print("docking unexpected error:", sys.exc_info())
-                print("smiles: ", smi)
-                return_dict[idx] = 99.9
-                continue
-            if len(affinity_list)==0:
-                affinity_list.append(99.9)
+            affinities = [99.9]
+            for _ in range(n_conf):
+                try:
+                    self.gen_3d(smi, ligand_mol_file)
+                except Exception as e:
+                    print(e)
+                    print("gen_3d unexpected error:", sys.exc_info())
+                    print("smiles: ", smi)
+                    continue
+                try:
+                    affinity_list = self.docking(receptor_file, ligand_mol_file,
+                                                ligand_pdbqt_file, docking_pdbqt_file)
+                except Exception as e:
+                    print(e)
+                    print("docking unexpected error:", sys.exc_info())
+                    print("smiles: ", smi)
+                    continue
+                if len(affinity_list)==0:
+                    affinity_list.append(99.9)
+                
+                affinities.append(affinity_list[0])
             
-            affinity = affinity_list[0]
-            return_dict[idx] = affinity
+            return_dict[idx] = min(affinities)
 
     def predict(self, smiles_list):
         """
