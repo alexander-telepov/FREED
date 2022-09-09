@@ -82,6 +82,9 @@ def train(args,seed,writer=None):
             SAC.train()
         elif args.mode =='eval':
             SAC.eval(args.num_mols)
+        elif args.mode == 'train+gen':
+            SAC.train()
+            SAC.generate_mols(args.num_mols, dump=True)
     
     elif args.rl_model == 'ppo':
         from mpi_tools import mpi_fork
@@ -112,7 +115,7 @@ def molecule_arg_parser():
     parser.add_argument('--rl_model', type=str, default='sac') # sac, td3, ddpg
 
     parser.add_argument('--gpu_id', type=int, default=None)
-    parser.add_argument('--mode', type=str, default='train', choices=['train', 'eval'], help='training or inference')
+    parser.add_argument('--mode', type=str, default='train', choices=['train', 'eval', 'train+gen'], help='training or inference')
     # env
     parser.add_argument('--env', type=str, help='environment name: molecule; graph', default='molecule')
     parser.add_argument('--seed', help='RNG seed', type=int, default=666)
@@ -216,7 +219,7 @@ def molecule_arg_parser():
     parser.add_argument('--epochs', type=int, default=40)
     parser.add_argument('--local_rank', type=int, default=0)
 
-    parser.add_argument('--num_mols', type=int, default=500)
+    parser.add_argument('--num_mols', type=int, default=1000)
     
     return parser
 

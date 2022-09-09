@@ -5,6 +5,8 @@ import math
 import os
 import numpy as np
 from rdkit import Chem
+import json
+from collections import defaultdict
 
 import torch
 from torch import nn
@@ -440,11 +442,6 @@ class sac:
         print('loss entropy', loss_entropy)
         print('loss_alpha', loss_alpha)
 
-        # Record things
-        if self.writer is not None:
-            self.writer.add_scalar("Entropy", sum(-(x * ac_prob_sp[i]).mean() for i, x in enumerate(log_ac_prob_sp)), self.iter_so_far)
-            self.writer.add_scalar("Alpha", alpha, self.iter_so_far)
-
         return loss_entropy, loss_policy, loss_alpha
 
     def compute_intr_loss_rew(self, ob, rew):
@@ -469,9 +466,6 @@ class sac:
         self.q_optimizer.zero_grad()
         loss_q.backward()
         clip_grad_norm_(self.q_params, 5)
-        for q in list(self.q_params):
-            ave_q_grads.append(q.grad.abs().mean().item())
-        self.writer.add_scalar("grad_q", np.array(ave_q_grads).mean(), self.iter_so_far)
         self.q_optimizer.step()
         self.q_scheduler.step(loss_q)
 
@@ -485,9 +479,6 @@ class sac:
         self.pi_optimizer.zero_grad()
         loss_pi.backward()
         clip_grad_norm_(self.pi_params, 5)
-        for p in self.pi_params:
-            ave_pi_grads.append(p.grad.abs().mean().item())
-        self.writer.add_scalar("grad_pi", np.array(ave_pi_grads).mean(), self.iter_so_far)
         self.pi_optimizer.step()
         self.pi_scheduler.step(loss_policy)
         
@@ -501,13 +492,14 @@ class sac:
         for p in self.q_params:
             p.requires_grad = True
         
-        # Record things
-        if self.writer is not None:
-            self.writer.add_scalar("loss_Q", loss_q.item(), self.iter_so_far)
-            self.writer.add_scalar("loss_Pi", loss_pi.item(), self.iter_so_far)
-            self.writer.add_scalar("loss_Policy", loss_policy.item(), self.iter_so_far)
-            self.writer.add_scalar("loss_Ent", loss_entropy.item(), self.iter_so_far)
-            self.writer.add_scalar("loss_alpha", loss_alpha.item(), self.iter_so_far)
+        log_items = {
+            "loss_Q": loss_q.item(),
+            "loss_Pi": loss_pi.item(),
+            "loss_Policy": loss_policy.item(),
+            "loss_Ent": loss_entropy.item(),
+            "loss_alpha": loss_alpha.item(),
+            "alpha": self.log_alpha.exp().item()
+        }
 
         # Finally, update target networks by polyak averaging.
 
@@ -518,6 +510,8 @@ class sac:
                 # params, as opposed to "mul" and "add", which would make new tensors.
                 p_targ.data.mul_(self.polyak)
                 p_targ.data.add_((1 - self.polyak) * p.data)
+        
+        return log_items
 
     def get_action(self, o, deterministic=False):
         return self.ac.act(o, deterministic)
@@ -650,11 +644,14 @@ class sac:
 
             # Update handling
             if t >= self.update_after and t % self.update_every == 0:
+                log_items = defaultdict(list)
                 for j in range(self.update_every):
                     t_update = time.time()
                     batch = self.replay_buffer.sample_batch(self.device, self.t, self.batch_size)
 
-                    self.update(data=batch)
+                    items = self.update(data=batch)
+                    for name, value in items.items():
+                        log_items[name].append(value.item() if torch.is_tensor(value) else value)
                     dt_update = time.time()
                     self.iter_so_far += 1
                     
@@ -673,6 +670,9 @@ class sac:
                         self.replay_buffer.update_priorities(idxs, priorities)
 
                     print('update time : ', j, dt_update-t_update)
+                
+                self.log_update(log_items)
+                del log_items
 
             # End of epoch handling
             if (t+1) % self.steps_per_epoch == 0:
@@ -681,12 +681,36 @@ class sac:
             # Save model
             if (t % self.save_freq == 0) or (t == (total_steps - 1)):
                 fname = os.path.join(self.args.model_dir, f'model_{t}.pth')
-                torch.save(self.ac.state_dict(), fname+"_rl")
+                torch.save({
+                    'ac': self.ac.state_dict(),
+                    'pi_optimizer': self.pi_optimizer.state_dict(),
+                    'q_optimizer': self.q_optimizer.state_dict(),
+                    'p_optimizer': self.q_optimizer.state_dict(),
+                    'alpha_optimizer': self.alpha_optimizer.state_dict(),
+                    'q_scheduler': self.q_scheduler.state_dict(),
+                    'pi_scheduler': self.pi_scheduler.state_dict(),
+                    'p_scheduler': self.p_scheduler.state_dict(),
+                    't': t,
+                    'iter_so_far': self.iter_so_far,
+                    'log_alpha': self.log_alpha.item()
+                }, fname)
                 print('model saved!',fname)
 
+    def log_update(self, items):
+        for name, value in items.items():
+            if torch.is_tensor(value):
+                _value = value.item()
+            elif isinstance(value, list):
+                _value = np.mean(value)
+            elif isinstance(value, float):
+                _value = value
+            else:
+                raise ValueError(f"Items have unsupported '{type(value)}' type for '{name}' key.")
+
+            self.writer.add_scalar(name, _value, self.iter_so_far)
 
     @torch.no_grad()
-    def eval(self, num_mols):
+    def generate_mols(self, num_mols, dump=False):
         self.env.smile_list = list()
         cands = self.ac.embed(self.ac.pi.cand)
         for _ in range(num_mols):
@@ -703,6 +727,14 @@ class sac:
                     d = True
                 if not any(o2['att']):
                     d = True
+        
+        if dump:
+            with open(os.path.join(self.args.mol_dir, 'gen.json'), 'wt') as f:
+                json.dump(self.env.smile_list, f, indent=4)
+
+    @torch.no_grad()
+    def eval(self, num_mols):
+        self.generate_mols(num_mols)
 
         ext_rew = self.env.reward_batch()
         with open(os.path.join(self.args.mol_dir, 'eval.csv'), 'a') as f:
