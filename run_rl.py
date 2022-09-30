@@ -234,20 +234,16 @@ def main():
 
     docking_config = dict()
     
-    assert args.target in ['fa7', 'parp1', '5ht1b', 'usp7'], "Wrong target type"
+    assert args.target in ['fa7', 'parp1', '5ht1b', 'usp7', 'abl1', 'fkb1a'], "Wrong target type"
     if args.target == 'fa7':
         box_center = (10.131, 41.879, 32.097)
         box_size = (20.673, 20.198, 21.362)
-        docking_config['receptor_file'] = 'ReLeaSE_Vina/docking/fa7/receptor.pdbqt'
     elif args.target == 'parp1':
         box_center = (26.413, 11.282, 27.238)
         box_size = (18.521, 17.479, 19.995)
-        docking_config['receptor_file'] = 'ReLeaSE_Vina/docking/parp1/receptor.pdbqt'
     elif args.target == '5ht1b':
         box_center = (-26.602, 5.277, 17.898)
         box_size = (22.5, 22.5, 22.5)
-        docking_config['receptor_file'] = 'ReLeaSE_Vina/docking/5ht1b/receptor.pdbqt'
-        docking_config['temp_dir'] = '5ht1b_tmp'
     elif args.target == 'usp7':
         if args.pocket_id == 0:
             box_center = (2.860, 4.819, 92.848)
@@ -255,9 +251,16 @@ def main():
         elif args.pocket_id == 1:
             box_center = (27.413, 1.55, 29.902)
             box_size = (16.221, 16.995, 17.858)
-        docking_config['receptor_file'] = 'ReLeaSE_Vina/docking/usp7/receptor.pdbqt'
-        docking_config['temp_dir'] = 'usp7'
-
+    elif args.target == 'abl1':
+        box_center = (16.496, 14.747, 3.999)
+        box_size = (14.963, 8.151, 5.892)
+    elif args.target == 'fkb1a':
+        box_center = (-35.137, 39.04, 32.495)
+        box_size = (8.453, 13.483, 8.112)
+    else:
+        raise ValueError(f'Unknown receptor {args.target}.')
+    
+    docking_config['receptor_file'] = f'ReLeaSE_Vina/docking/{args.target}/receptor.pdbqt'
     docking_config['temp_dir'] = os.path.join(exp_dir, 'tmp')
     box_parameter = (box_center, box_size)
     docking_config['vina_program'] = './bin/qvina02'
